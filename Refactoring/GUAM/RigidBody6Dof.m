@@ -2,44 +2,46 @@ classdef RigidBody6Dof < handle
     % RIGIDBODY6DOF 6-Degree-of-Freedom Rigid Body Dynamics Model
     % Uses inverse inertia matrix formulation for rotational dynamics.
     properties
-        m       % Mass (kg)
-        I       % Inertia Matrix (3x3, kg*m^2)
-        invI    % Inverse Inertia Matrix (3x3, 1/(kg*m^2))
-        g       % Gravity acceleration (m/s^2)
+        m       % Mass (lb)
+        I       % Inertia Matrix (3x3, lb*ft^2)
+        invI    % Inverse Inertia Matrix (3x3, 1/(lb*ft^2))
     end
     
     methods
         function obj = RigidBody6Dof(vehicleConfig)
-            % Constructor
-            if nargin < 3
-                gravity = 9.80665;
-            end
             obj.m = vehicleConfig.mass;
             obj.I = vehicleConfig.inertia;
             obj.invI = inv(obj.I);
-            obj.g = vehicleConfig.gravity;
         end
         
-        function dx = calculate_dynamics(obj, x, F, M)
-            % x: State vector [rn, re, rd, u, v, w, phi, theta, psi, p, q, r]' (12x1)
+        function dx = calculate_dynamics(obj, state, F, M)
+            % state: State vector [rn, re, rd, u, v, w, phi, theta, psi, p, q, r]' (12x1)
             % F: Body forces [Fx, Fy, Fz]' (3x1)
             % M: Body moments [Mx, My, Mz]' (3x1)
             % dx: State derivative (12x1)
             
             % 1. State Extraction
             % Position (not directly needed for dynamics, but for completeness)
-            rn = x(1); re = x(2); rd = x(3);
+            rn = state(1); 
+            re = state(2); 
+            rd = state(3);
             
             % Linear Velocity (Body frame)
-            V_b = x(4:6);
-            u = V_b(1); v = V_b(2); w = V_b(3);
+            V_b = state(4:6);
+            u = V_b(1); 
+            v = V_b(2); 
+            w = V_b(3);
             
             % Euler Angles
-            phi = x(7); theta = x(8); psi = x(9);
+            phi = state(7); 
+            theta = state(8); 
+            psi = state(9);
             
             % Angular Velocity (Body frame)
-            omega = x(10:12);
-            p = omega(1); q = omega(2); r = omega(3);
+            omega = state(10:12);
+            p = omega(1); 
+            q = omega(2); 
+            r = omega(3);
             
             % Pre-compute trigonometric functions
             cPhi = cos(phi); sPhi = sin(phi);
