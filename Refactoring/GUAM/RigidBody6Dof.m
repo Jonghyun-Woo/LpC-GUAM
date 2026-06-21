@@ -5,13 +5,15 @@ classdef RigidBody6Dof < handle
         m       % Mass (lb)
         I       % Inertia Matrix (3x3, lb*ft^2)
         invI    % Inverse Inertia Matrix (3x3, 1/(lb*ft^2))
+        gravity % Gravity object (body-frame gravity vector)
     end
-    
+
     methods
         function obj = RigidBody6Dof(vehicleConfig)
             obj.m = vehicleConfig.mass;
             obj.I = vehicleConfig.inertia;
             obj.invI = inv(obj.I);
+            obj.gravity = Gravity(vehicleConfig);
         end
         
         function dx = calculate_dynamics(obj, state, F, M)
@@ -65,7 +67,7 @@ classdef RigidBody6Dof < handle
             euler_dot = T_rot * omega;
             
             % 4. Translational Dynamics (Linear Velocity Derivative)
-            gravity_b = obj.g * [-sThe; sPhi*cThe; cPhi*cThe];
+            gravity_b = obj.gravity.compute_gravity_body_frame(phi, theta);
             cross_omega_v = cross(omega, V_b);
             v_dot = -cross_omega_v + gravity_b + (1/obj.m) * F;
             
