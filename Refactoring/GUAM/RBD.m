@@ -1,4 +1,4 @@
-classdef RigidBody6Dof < handle
+classdef RBD < handle
     % RIGIDBODY6DOF 6-Degree-of-Freedom Rigid Body Dynamics Model
     % Uses inverse inertia matrix formulation for rotational dynamics.
     properties
@@ -9,7 +9,7 @@ classdef RigidBody6Dof < handle
     end
 
     methods
-        function obj = RigidBody6Dof(vehicleConfig)
+        function obj = RBD(vehicleConfig)
             obj.m = vehicleConfig.mass;
             obj.I = vehicleConfig.inertia;
             obj.invI = inv(obj.I);
@@ -24,15 +24,15 @@ classdef RigidBody6Dof < handle
             
             % 1. State Extraction
             % Position (not directly needed for dynamics, but for completeness)
-            rn = state(1); 
-            re = state(2); 
-            rd = state(3);
+            % rn = state(1); 
+            % re = state(2); 
+            % rd = state(3);
             
             % Linear Velocity (Body frame)
             V_b = state(4:6);
-            u = V_b(1); 
-            v = V_b(2); 
-            w = V_b(3);
+            % u = V_b(1); 
+            % v = V_b(2); 
+            % w = V_b(3);
             
             % Euler Angles
             phi = state(7); 
@@ -41,9 +41,9 @@ classdef RigidBody6Dof < handle
             
             % Angular Velocity (Body frame)
             omega = state(10:12);
-            p = omega(1); 
-            q = omega(2); 
-            r = omega(3);
+            % p = omega(1); 
+            % q = omega(2); 
+            % r = omega(3);
             
             % Pre-compute trigonometric functions
             cPhi = cos(phi); sPhi = sin(phi);
