@@ -7,40 +7,27 @@ classdef LpC_GUAM < handle
         simConfig       % SimConfig
         rigidBody       % RigidBody6Dof
         aeroFrame       % AeroFrame
+        engineDynamics  % Engine Dynamics
+        surfaceDynamics % Control Surface Dynamics (Aileron, Elevator, Rudder)
+        
         state           % Current state vector [rn re rd u v w phi theta psi p q r]' (12x1)
-        history         % Struct array log: t, state, alpha, beta
     end
 
     methods
         function obj = LpC_GUAM()
             obj.vehicleConfig = VehicleConfig();
             obj.simConfig = SimConfig();
-            obj.rigidBody = RigidBody6Dof(obj.vehicleConfig);
+            obj.rigidBody = RBD(obj.vehicleConfig);
             obj.aeroFrame = AeroFrame();
             obj.state = zeros(12, 1);
-            obj.history = struct('t', {}, 'state', {}, 'alpha', {}, 'beta', {});
         end
 
-        function run(obj)
-            t_vec = 0:obj.simConfig.dt:obj.simConfig.T;
-            obj.history = struct('t', {}, 'state', {}, 'alpha', {}, 'beta', {});
-
-            for k = 1:length(t_vec)
-                u = obj.state(4);
-                v = obj.state(5);
-                w = obj.state(6);
-                [alpha, beta, ~] = obj.aeroFrame.compute(u, v, w);
-
-                % Placeholder body forces/moments until the polynomial
-                % aero/propulsion model is ported (follow-up task).
-                F = zeros(3, 1);
-                M = zeros(3, 1);
-
-                obj.history(end+1) = struct('t', t_vec(k), 'state', obj.state, 'alpha', alpha, 'beta', beta);
-
-                dx = obj.rigidBody.calculate_dynamics(obj.state, F, M);
-                obj.state = obj.state + obj.simConfig.dt * dx;
-            end
+        function step(obj, engine_cmd, surface_cmd)
+            
+            % engine_out
+            % surface_out
+            % run_LpC_aero(x,n,d,rho,a,Units,Model);
+            run_LpC_aero(x, engine_out, surface_out, rho, a, units, obj.vehicleConfig);
         end
     end
 end
