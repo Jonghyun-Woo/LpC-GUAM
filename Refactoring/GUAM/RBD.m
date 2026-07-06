@@ -2,16 +2,16 @@ classdef RBD < handle
     % RIGIDBODY6DOF 6-Degree-of-Freedom Rigid Body Dynamics Model
     % Uses inverse inertia matrix formulation for rotational dynamics.
     properties
-        m       % Mass (lb)
-        I       % Inertia Matrix (3x3, lb*ft^2)
-        invI    % Inverse Inertia Matrix (3x3, 1/(lb*ft^2))
+        m       % Mass (slug)
+        I       % Inertia Matrix (3x3, slug*ft^2)
+        invI    % Inverse Inertia Matrix (3x3, 1/(slug*ft^2))
         gravity % Gravity object (body-frame gravity vector)
     end
 
     methods
         function obj = RBD(vehicleConfig)
             obj.m = vehicleConfig.mass;
-            obj.I = vehicleConfig.inertia;
+            obj.I = vehicleConfig.I;
             obj.invI = inv(obj.I);
             obj.gravity = Gravity(vehicleConfig);
         end
@@ -53,7 +53,7 @@ classdef RBD < handle
             % 2. Translational Kinematics (Position Derivative)
             R_b2i = [
                 cThe*cPsi, sPhi*sThe*cPsi - cPhi*sPsi, cPhi*sThe*cPsi + sPhi*sPsi;
-                cThe*sPsi, sPhi*sThe*sPsi + cPhi*cPsi, cPhi*sThe*sPsi - sPhi*cPhi;
+                cThe*sPsi, sPhi*sThe*sPsi + cPhi*cPsi, cPhi*sThe*sPsi - sPhi*cPsi;
                 -sThe,     sPhi*cThe,                  cPhi*cThe
             ];
             p_dot = R_b2i * V_b;

@@ -29,10 +29,9 @@ classdef RSLQR < handle
     methods
 
         function obj = RSLQR()
-            % Design gain-scheduled RSLQR over the full trim envelope.
-            % XEQ_TABLE : 21 x N_trim x M_trim x L_trim  trim state/control table
-            % FreeVar_Table : n x m x M_trim x L_trim     free-variable flags per schedule slice
-            % Trans_Table   : 2 x M_trim x L_trim          transition velocity bounds [ft/s]
+            % Load the precomputed gain-scheduled RSLQR design
+            % (trim table + lon/lat gain tables over the UH x WH envelope).
+            % trim_table_Poly_ConcatVer4p0.mat must be on the MATLAB path.
 
             obj.cfg = RSLQRConfig;
             S = load('trim_table_Poly_ConcatVer4p0.mat');
@@ -101,7 +100,7 @@ classdef RSLQR < handle
             %
             % obj.XU0 is 25 x N_uh x N_wh:
             %   rows 1-12  : trim state vector  [u; v; w; p; q; r; ax; ay; az; phi; theta; psi]
-            %   rows 13-25 : trim input vector  [lift rotor speeds (1:8); pusher rotor speed (9); control surfaces (flap; aileron; elevator; rudder)]
+            %   rows 13-25 : trim input vector  [flap; aileron; elevator; rudder; lift rotor speeds (1:8); pusher rotor speed (9)]
             %
             % Inputs
             %   uh_curr : scalar  current heading-frame x-velocity [ft/s]
@@ -256,15 +255,17 @@ classdef RSLQR < handle
         end
 
         function [engine, surface] = pseudo_alloc(obj, U0, ctrl_lon, ctrl_lat, mdes_lon, mdes_lat)
-            M_lon = ctrl_lon.W \ ctrl_lon.B' * ((ctrl_lon.B * (ctrl_lon.W \ eye(3)) * ctrl_lon.B') \ eye(3));
-            M_lat = ctrl_lat.W \ ctrl_lat.B' * ((ctrl_lat.B * (ctrl_lat.W \ eye(3)) * ctrl_lat.B') \ eye(3));
+            % Weighted pseudo-inverse allocation: M = W^-1 B' (B W^-1 B')^-1
+            M_lon = (ctrl_lon.W \ ctrl_lon.B') / (ctrl_lon.B * (ctrl_lon.W \ ctrl_lon.B'));
+            M_lat = (ctrl_lat.W \ ctrl_lat.B') / (ctrl_lat.B * (ctrl_lat.W \ ctrl_lat.B'));
 
             act_lon = M_lon*mdes_lon;
 
             scale_factor = 1; % Initialize scale factor to 1
 
             % Check if any engines exceed max position limit
-            if any(act_lon(1:8) > obj.cfg.eng_max)
+            % (matches vehicles/Lift+Cruise/Control/Limited_Long_Cont_Alloc.m)
+            if any(act_lon(1:9) > obj.cfg.eng_max)
                 for loop = 1:9
                     scale_temp = obj.cfg.eng_max(loop)/(M_lon(loop,:)*mdes_lon);
                     if scale_temp>0 && scale_temp<1 && scale_temp < scale_factor
@@ -317,20 +318,27 @@ classdef RSLQR < handle
         end
 
         function [engine, surface] = control(obj, state, ref)
-            ref_pos = ref.pos;
-            ref_chi = ref.chi;
-            ref_vel = ref.vel;
-            u_cmd = ref_vel(1);
-            w_cmd = ref_vel(3);
-            ref_chi_dot = ref.chi_dot;
+            % ref : struct with fields pos (3x1), vel (3x1, heading frame),
+            %       chi (scalar), chi_dot (scalar)
+            u_cmd = ref.vel(1);
+            w_cmd = ref.vel(3);
 
-            [e_pos_body, e_chi] = obj.guidance_error(state, ref_pos, ref_chi);
+            [e_pos_body, e_chi] = obj.guidance_error(state, ref);
             [X0, U0, ctrl_lon, ctrl_lat] = obj.scheduled_params(u_cmd, w_cmd);
-            [Xlon, Xlat, Xlon_cmd, Xlat_cmd] = obj.perturb_lin_ctrl(state, ref_vel, ref_chi_dot, e_pos_body, e_chi, X0);
+            [Xlon, Xlat, Xlon_cmd, Xlat_cmd] = obj.perturb_lin_ctrl(state, ref, e_pos_body, e_chi, X0);
             mdes_lon = obj.lon_ctrl(ctrl_lon, Xlon_cmd, Xlon);
             mdes_lat = obj.lat_ctrl(ctrl_lat, Xlat_cmd, Xlat);
-            
+
             [engine, surface] = obj.pseudo_alloc(U0, ctrl_lon, ctrl_lat, mdes_lon, mdes_lat);
+        end
+
+        function reset(obj)
+            % Zero the servo-compensator integrators and virtual attitude
+            % allocation states (call before starting a new run).
+            obj.ctrl_lon_i = zeros(3, 1);
+            obj.ctrl_lat_i = zeros(3, 1);
+            obj.phi_v   = 0;
+            obj.theta_v = 0;
         end
     end % methods
 

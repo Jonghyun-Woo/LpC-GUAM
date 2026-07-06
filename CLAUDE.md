@@ -10,9 +10,11 @@ aero-propulsive/actuator/sensor/control variant subsystems, and reference-trajec
 piecewise Bezier curves, doublets). No build system, package manager, or test framework is present — this is MATLAB
 script/model code intended to be run inside MATLAB/Simulink.
 
-Current branch (`refactoring/mcode`) is mid-effort porting parts of the Simulink/m-code simulation into a pure
-object-oriented MATLAB implementation under `Refactoring/` (see below) — most classes there are skeletons/stubs,
-not yet wired into a runnable simulation.
+Current branch (`refactoring/mcode`) ports the Simulink simulation into a pure object-oriented MATLAB
+implementation under `Refactoring/` (see below). As of 2026-07-06 this port is a **runnable end-to-end
+closed-loop simulation** of the hover-to-cruise transition scenario, restricted to a flat-earth formulation
+(NED/Body/Aero frames only — no ECI/ECEF, no turbulence). Entry point: `Refactoring/run_transition_sim.m`;
+full documentation in `Refactoring/docs/WIKI.md`.
 
 ## Running the simulation
 
@@ -74,21 +76,43 @@ and `utilities/Animate_SimOut.m`.
   longitudinal and lateral axes separately via `get_lin_dynamics_heading.m` (linearizes at a flight condition) and
   axis-specific scripts (`get_lat_dynamics_heading.m`, `ctrl_lat.m`, etc.).
 
-## Architecture (in-progress `Refactoring/` port)
+## Architecture (`Refactoring/` m-code port)
 
-A parallel, non-Simulink OOP MATLAB implementation, intended to eventually replace the corresponding Simulink
-blocks with plain class-based code:
-- `Refactoring/config/VehicleConfig.m` — static vehicle parameters (mass, inertia, gravity, prop layout) in
-  slug/ft units, mirroring `vehicles/Lift+Cruise` constants.
-- `Refactoring/config/SimConfig.m` — simulation time step/duration.
-- `Refactoring/GUAM/RigidBody6Dof.m` — standalone 6-DOF equations of motion (`calculate_dynamics`), state vector
-  `[rn re rd u v w phi theta psi p q r]'`, taking body forces/moments and returning the state derivative.
-- `Refactoring/GUAM/Gravity.m` — gravity-in-body-frame helper; currently stubbed to return zeros (real
-  trig-based computation is commented out — do not assume it's wired up).
-- `Refactoring/GUAM/Environment.m` — wind/turbulence (Dryden filter) model; constructor and most methods are
-  partially stubbed/commented out, work in progress.
-- `Refactoring/GUAM/LpC_GUAM.m` — top-level integration point for the refactor; currently empty.
-- `Refactoring/utils/Units.m` — static ft/m, lb/kg unit conversion helpers.
+A parallel, non-Simulink OOP MATLAB implementation replacing the corresponding Simulink blocks with plain
+class-based code. It mirrors GUAM's default variant configuration (Polynomial aero, FirstOrder actuators,
+Simple EOM, baseline controller) under a flat-earth assumption. Status: **runnable** — verified headless in
+MATLAB R2025a against the Hover2Cruise transition (40 s, stable, tracks the velocity reference).
 
-When extending `Refactoring/`, check which methods are still stubs (commented-out bodies, hardcoded zero returns)
-before assuming functionality exists — several classes here are skeletons, not working code.
+- `Refactoring/run_transition_sim.m` — entry script: adds paths, runs the closed-loop sim, plots
+  position/velocity/attitude/effectors vs. reference. Programmatic use: `guam = LpC_GUAM(); out = guam.run();`.
+- `Refactoring/GUAM/LpC_GUAM.m` — top-level orchestrator. `reset()` initializes at the trim of the first
+  reference point; `step(ref)` runs one closed-loop step (RSLQR control → engine/surface servos → atmosphere →
+  polynomial aero → 6-DOF EOM → forward Euler, Δt = 0.01 s); `run()` executes the whole scenario with logging.
+- `Refactoring/GUAM/RBD.m` — flat-earth 6-DOF Euler-angle EOM (`calculate_dynamics`), state
+  `[rn re rd u v w phi theta psi p q r]'`; gravity added inside via `Gravity.m` (implemented, body-frame tilt).
+- `Refactoring/GUAM/AeroPolynomial/` — copy of the polynomial aero-propulsive model from
+  `vehicles/Lift+Cruise/AeroProp/Polynomial/` (entry `run_LpC_aero.m`). Surface input order is
+  `[LA RA LE RE RUD]` (flaperon convention); engine vector `n` maps to internal rotors as
+  `n(1..9) → N1 N3 N5 N7 N2 N4 N6 N8 N9`. `check_fac_limits.m` here holds boundary values instead of erroring.
+- `Refactoring/GUAM/EngineDynamics.m` / `SurfaceDynamics.m` — first-order rate/position-limited servos matching
+  ServosLib "First Order Dynamic Rate and Position Limited Servo" (engines: ωn = 4π rad/s, [0,1600/2000 RPM];
+  surfaces: ωn = 20 rad/s, ±30°; both RL = 100).
+- `Refactoring/GUAM/Environment.m` — flat-earth US Standard Atmosphere 1976 troposphere (`atmosphere(h)`) +
+  steady NED wind (`airspeed_body`); no turbulence.
+- `Refactoring/GUAM/AeroFrame.m` — α/β/airspeed per the polynomial-model convention (used for logging).
+- `Refactoring/controller/RSLQR.m` — port of the baseline unified RSLQR controller (AIAA 2021-0999):
+  bilinear gain scheduling over (UH, WH) from `trim_table_Poly_ConcatVer4p0.mat`, lon/lat servo-compensator
+  LQR, weighted pseudo-inverse allocation `M = W⁻¹Bᵀ(BW⁻¹Bᵀ)⁻¹` with limit scaling, virtual attitude
+  effectors θ_v/φ_v. Trim input ordering: `U0 = [flap; ail; ele; rud; eng1..9]`.
+- `Refactoring/config/` — `VehicleConfig.m` (SACD L+C mass/geometry/prop layout, slug/ft), `SimConfig.m`
+  (Δt = 0.01 s, T = 40 s), `RSLQRConfig.m` (LQR/allocation weights + embedded Hover2Cruise reference tables
+  `ref_pos/ref_vel/ref_chi/ref_chidot`, matching `Exec_Scripts/exam_TS_Hover2Cruise_traj.m`).
+- `Refactoring/utils/Units.m` — class wrapper of `lib/utilities/setUnits.m`; the aero model consumes `.deg`
+  and `.knot`.
+- `Refactoring/docs/WIKI.md` — full documentation: modification history, frames, dynamics/aero/actuator/
+  environment models, controller theory, and paper references.
+
+Known characteristics: position tracking shows bounded lag/overshoot (max ~40 ft N) because the original
+example's reference position (piecewise-linear) and velocity (ramp) are mutually inconsistent and the outer
+position loop gain is weak (0.1) — this matches the source simulation's behavior, not a bug.
+`AeroPolynomial/poly_aero_wrapper_Mod.m` is offline linearization tooling, not used at runtime.

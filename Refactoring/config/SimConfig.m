@@ -8,7 +8,7 @@ classdef SimConfig < handle
     methods
         function obj = SimConfig()
             obj.dt = 0.01;  % Time step (s)
-            obj.T = 10;     % Total simulation time (s)
+            obj.T = 40;     % Total simulation time (s)
         end
         
         function display_simulation_config(obj)

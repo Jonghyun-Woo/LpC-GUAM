@@ -55,6 +55,15 @@ classdef RSLQRConfig
 
 
         dt = 0.01;
+        traj_len = length(0 : RSLQRConfig.dt : 40);
+        ref_pos = [zeros([1, (RSLQRConfig.traj_len-1)/2+1]), linspace(0, 150, (RSLQRConfig.traj_len-1)/2);...
+                   zeros([1, RSLQRConfig.traj_len]);...
+                   linspace(0, -80, (RSLQRConfig.traj_len-1)/2+1), linspace(-80, -100, (RSLQRConfig.traj_len-1)/2)];
+        ref_vel = [zeros([1, (RSLQRConfig.traj_len-1)/2+1]), linspace(0, 15, (RSLQRConfig.traj_len-1)/2);...
+                   zeros([1, RSLQRConfig.traj_len]);...
+                   linspace(-8, 0, (RSLQRConfig.traj_len-1)/2+1), zeros([1, (RSLQRConfig.traj_len-1)/2])];
+        ref_chi = zeros([1, RSLQRConfig.traj_len]);
+        ref_chidot = zeros([1, RSLQRConfig.traj_len]);
     end
 
 end
