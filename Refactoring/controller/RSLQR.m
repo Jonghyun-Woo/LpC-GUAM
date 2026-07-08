@@ -34,7 +34,7 @@ classdef RSLQR < handle
             % trim_table_Poly_ConcatVer4p0.mat must be on the MATLAB path.
 
             obj.cfg = RSLQRConfig;
-            S = load('trim_table_Poly_ConcatVer4p0.mat');
+            S = load('tables/trim/trim_table_Poly_ConcatVer4p0.mat');
             obj.XU0 = S.XU0_interp;
             obj.UH  = S.UH;
             obj.WH  = S.WH;
