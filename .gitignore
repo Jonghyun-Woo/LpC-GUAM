@@ -8,3 +8,6 @@ docs/refs/*.pdf
 
 # MAT files: keep local, commit only distilled .md notes
 *.mat
+
+# Test Scripts
+Refactoring/tests

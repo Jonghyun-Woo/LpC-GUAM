@@ -31,10 +31,12 @@ Refactoring/
 ├── controller/
 │   ├── RSLQR.m               # baseline 통합 RSLQR 이득스케줄 제어기
 │   └── trim_table_Poly_ConcatVer4p0.mat  # 트림표 + lon/lat 이득표
+├── trajectory/
+│   └── ReferenceTrajectory.m # m-file 전용 궤적 생성기 (climb/althold, static build)
 ├── config/
 │   ├── VehicleConfig.m       # 비행체 질량/관성/기하/프롭 배치 (slug·ft)
-│   ├── SimConfig.m           # dt = 0.01 s, T = 40 s
-│   └── RSLQRConfig.m         # LQR/할당 가중치 + 임베디드 기준 궤적표
+│   ├── SimConfig.m           # dt = 0.01 s, T = 40 s, scenario 소유 + 궤적 로드
+│   └── RSLQRConfig.m         # LQR/할당 가중치 + 컨트롤러 dt (궤적표는 보유 안 함)
 ├── utils/
 │   └── Units.m               # setUnits.m 의 클래스 래퍼 (단위 변환)
 └── docs/
@@ -43,9 +45,10 @@ Refactoring/
 
 ### 실행 워크플로우 (per-step 파이프라인)
 
-`run_transition_sim.m` → `guam = LpC_GUAM(); out = guam.run();`. `LpC_GUAM`은 모든 하위 모델 객체를
-생성하고 첫 기준점의 트림에서 `reset()`한다. `run()`은 기준 궤적표 전체(N = 4001 스텝)를 순회하며 매 스텝
-`step(ref)`를 호출하고 상태/구동기/공력프레임을 로깅한다.
+`run_transition_sim.m` → `guam = LpC_GUAM(scenario); out = guam.run();`(기본 `scenario='althold'`).
+`LpC_GUAM`은 모든 하위 모델 객체를 생성하고, `SimConfig.getReferenceTrajectory()`로 궤적표를 로드한 뒤 첫
+기준점의 트림에서 `reset()`한다. `run()`은 기준 궤적표 전체(N = 4001 스텝)를 순회하며 매 스텝 `step(ref)`를
+호출하고 상태/구동기/공력프레임을 로깅한다.
 
 `LpC_GUAM.step(ref)` 한 스텝(GUAM.slx 기본 변형과 일치, forward Euler, Δt = 0.01 s):
 1. **제어**: `controller.control(state, ref)` → 엔진 명령(9×1, rad/s), 조종면 명령(5×1, rad)
@@ -94,21 +97,29 @@ Refactoring/
 - `Refactoring/config/VehicleConfig.m` — SACD L+C 질량/관성/기하/프롭 배치(slug·ft). `LpC_model_parameters.m`을
   `Constant` 프로퍼티로 옮기고, 생성자에서 프롭 hub 회전행렬(`Prop_R_BH`)·회전축 단위벡터(`Prop_rot_axis_e`)·
   추력 방향(`p_T_e`)·역관성(`inv_I`)을 계산한다. 아래 두 방식으로 공력 모델의 `Model` 인자로 전달된다.
-- `Refactoring/config/SimConfig.m` — Δt = 0.01 s, T = 40 s.
+- `Refactoring/trajectory/ReferenceTrajectory.m` — m-file 전용 기준 궤적 생성기. static
+  `build(scenario, dt, T)`가 `climb`/`althold` 시나리오의 dense 테이블(`pos/vel/chi/chidot`, N=4001)을
+  반환한다. `climb`은 이전에 `RSLQRConfig`에 하드코딩됐던 표를 비트 동일 재현. Simulink·lib 무의존.
+- `Refactoring/config/SimConfig.m` — Δt = 0.01 s, T = 40 s, `scenario`(기본 `althold`) 소유.
+  `getReferenceTrajectory()`가 `ReferenceTrajectory.build`를 호출해 궤적을 로드한다.
 - `Refactoring/config/RSLQRConfig.m` — LQR/할당 가중치(`Qlon/Rlon/Wlon`, `Qlat/Rlat/Wlat`)와 차원 상수,
-  구동기 한계, 그리고 임베디드 Hover2Cruise 기준 궤적표(`ref_pos/ref_vel/ref_chi/ref_chidot`, `linspace`로
-  구성, `Exec_Scripts/exam_TS_Hover2Cruise_traj.m`와 일치). 궤적 길이 `traj_len = length(0:0.01:40) = 4001`.
+  구동기 한계, 컨트롤러 서보-보상기 적분 스텝 `dt`(RSLQR가 `obj.cfg.dt`로 소비). 기준 궤적표는 더 이상
+  보유하지 않는다(→ `ReferenceTrajectory`/`SimConfig`).
 - `Refactoring/utils/Units.m` — `lib/utilities/setUnits.m`의 클래스 래퍼. 공력 모델은 `.deg`와 `.knot`를
   소비한다. `Units('ft','slug')`(GUAM 기본) 또는 `Units('m','kg')`(SI) 선택 가능.
 - `Refactoring/docs/WIKI.md` — 전체 문서: 수정 이력, 프레임, 동역학/공력/구동기/환경 모델, 제어 이론, 논문 참고문헌.
 
 ### 참조 시나리오 (Hover2Cruise 천이, 40 s)
 
-`RSLQRConfig`에 임베디드된 기준 궤적:
-- 0-20 s: 수직 상승 0 → 80 ft (초기 상승률 8 ft/s)
-- 20-40 s: 전진비행 15 ft/s로 가속, 100 ft까지 상승
+`ReferenceTrajectory.build(scenario, dt, T)`가 생성, `LpC_GUAM(scenario)`로 선택(기본 `althold`):
+- 공통 0-20 s: 수직 상승 0 → 80 ft (초기 상승률 8 ft/s)
+- 공통 20-40 s: 전진비행 15 ft/s로 가속
+- `althold`(기본): 크루즈 구간 고도 80 ft 유지(기준 w=0과 정합). 폐루프 최종 Down ≈ −79 ft.
+- `climb`(원본): 크루즈 구간 100 ft까지 계속 상승(기준 위치는 상승, 기준 w=0 → 위치/속도 불일치).
+  폐루프 최종 Down ≈ −89 ft.
 
-알려진 특성: 위치 추종에 유계(bounded) 지연/오버슈트(북쪽 최대 ~40 ft)가 나타난다. 이는 원본 예제의 기준
-위치(구간별 선형)와 속도(램프)가 상호 불일치하고 외루프 위치 이득이 약하기(0.1) 때문이며, 원본 시뮬레이션의
-거동과 일치하는 것으로 버그가 아니다. `AeroPolynomial/poly_aero_wrapper_Mod.m`(및 `_du.m`)는 오프라인
+알려진 특성: 위치 추종에 유계(bounded) 지연/오버슈트(북쪽 최대 ~40 ft)가 나타난다. 이는 기준 위치(구간별
+선형)와 속도(램프)가 상호 불일치하고 외루프 위치 이득이 약하기(0.1) 때문이며, 원본 시뮬레이션의 거동과
+일치하는 것으로 버그가 아니다. (`climb`의 위치/속도 불일치가 그 예. `althold`는 크루즈 고도를 일관되게 만든
+버전.) `AeroPolynomial/poly_aero_wrapper_Mod.m`(및 `_du.m`)는 오프라인
 선형화 도구이며 런타임에는 사용되지 않는다.
