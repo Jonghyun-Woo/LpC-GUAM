@@ -21,7 +21,10 @@ argument-hint: <구현/수정/리팩토링할 대상>
 - 규약은 `Refactoring/docs/conventions.md`, 이론은 `Refactoring/docs/WIKI.md`,
   아키텍처 세부는 해당 폴더의 `CLAUDE.md`를 참조한다.
 - 관련 코드를 실제로 읽고 `file:line`으로 근거를 남긴다. 탐색 범위가 넓으면 Explore 에이전트를 병렬 사용한다.
-- 레퍼런스(논문 등)가 있으면 핵심 알고리즘·수식·구조를 요약한다.
+- 레퍼런스(논문 등)는 `docs/refs/`에 올려둔 PDF를 Read로 읽는다. 컨텍스트 절약을 위해 사용자가
+  짚어준 페이지·섹션(예: `pages="3-8"`, "Eq.(12)–(15), Table 2")만 정밀하게 읽고, 핵심(알고리즘·수식·게인
+  구조)을 `docs/refs/<paper>.md`로 증류해 남긴다. 계획서는 이 `.md` 노트를 인용한다.
+  (PDF 원본은 gitignore되고, 증류한 `.md` 노트만 커밋된다.)
 - 필요하면 `matlab -batch`로 규약·수치를 실제 확인한다.
 
 ## 3. 논의

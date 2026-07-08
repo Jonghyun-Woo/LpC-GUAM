@@ -2,3 +2,6 @@
 
 # Local planning artifacts (not shared)
 plans/
+
+# Reference papers: keep PDFs local (binary bloat + copyright), commit only the distilled .md notes
+docs/refs/*.pdf
