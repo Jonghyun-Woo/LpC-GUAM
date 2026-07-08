@@ -9,18 +9,5 @@
       "Bash(wc:*)"
     ],
     "deny": []
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo [language-rule] prose and docs in Korean, code and inline comments in English -- see CLAUDE.md"
-          }
-        ]
-      }
-    ]
   }
 }
