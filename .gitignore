@@ -5,3 +5,6 @@ plans/
 
 # Reference papers: keep PDFs local (binary bloat + copyright), commit only the distilled .md notes
 docs/refs/*.pdf
+
+# MAT files: keep local, commit only distilled .md notes
+*.mat
