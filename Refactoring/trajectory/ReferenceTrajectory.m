@@ -31,6 +31,34 @@ classdef ReferenceTrajectory
             time = 0 : dt : T;
             N    = numel(time);
 
+            % Verification-only forward-transition scenario for the LON
+            % liveness filter. Mission = LEVEL forward transition: forward
+            % speed ramps 17 -> 59 ft/s (crossing several UH trim tables so
+            % the filter's UH scheduling is exercised) at CONSTANT altitude.
+            % The test harness starts the vehicle off-trim; the WH3
+            % (descending) BRT is the safety envelope and the filter, anchored
+            % to WH3 (RSLQR safety_wh_anchor), engages only if the transition
+            % would leave that envelope. Used by verify_liveness_lon_realbrt.m.
+            %
+            % Frame rule: vel(3) is the heading/inertial vertical velocity, so
+            % level flight is vel(3) = 0. Do NOT put the body-frame WH here (an
+            % earlier bug integrated WH3 body-w as an inertial descent rate).
+            % The WH3 anchor is pinned by the filter, not encoded here.
+            if strcmp(scenario, 'lon_brt_verify')
+                pos = zeros(3, N);
+                vel = zeros(3, N);
+                vel(1, :) = linspace(17, 59, N);    % forward speed sweep across UH tables
+                vel(3, :) = 0;                      % level flight (altitude hold)
+                pos(1, :) = cumtrapz(time, vel(1, :));
+                pos(3, :) = -300 * ones(1, N);      % hold 300 ft up
+                ref = struct('time',   time, ...
+                             'pos',    pos, ...
+                             'vel',    vel, ...
+                             'chi',    zeros(1, N), ...
+                             'chidot', zeros(1, N));
+                return;
+            end
+
             % Split hover (first half, 0..T/2) from cruise (second half).
             % Time-based split so the segment boundary sits at t = T/2
             % regardless of grid length. For T = 40, dt = 0.01 this gives

@@ -4,6 +4,7 @@ classdef SimConfig < handle
         dt        % Time step (s)
         T         % Total simulation time (s)
         scenario  % Reference trajectory scenario: 'althold' (default) | 'climb'
+                  %   | 'lon_brt_verify' (verification-only descending WH3 scenario)
     end
 
     methods

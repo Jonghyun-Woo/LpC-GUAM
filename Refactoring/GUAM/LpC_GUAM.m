@@ -47,6 +47,10 @@ classdef LpC_GUAM < handle
             obj.engineDynamics  = EngineDynamics(obj.simConfig.dt);
             obj.surfaceDynamics = SurfaceDynamics(obj.simConfig.dt);
 
+            % Give the LON liveness filter a handle to the true plant rate so
+            % it can evaluate a nonlinear dV/dt (rate_mode 'nonlinear').
+            obj.controller.set_liveness_dynamics(@obj.lon_plant_rate);
+
             obj.reset();
         end
 
@@ -101,6 +105,31 @@ classdef LpC_GUAM < handle
             dx = obj.rigidBody.calculate_dynamics(obj.state, Fb, Mb);
             obj.state = obj.state + obj.simConfig.dt .* dx;
             obj.time  = obj.time + obj.simConfig.dt;
+        end
+
+        function Xlon_dot = lon_plant_rate(obj, x_full, U0, u_perturb)
+            % True longitudinal state rate for the liveness filter's nonlinear
+            % dV/dt. Assembles absolute effectors from trim (U0) plus the
+            % 11-channel effector perturbation u_perturb = [Pi1..8; Pi9; de; df]
+            % (same split/mapping as reset() and RSLQR.srface_cmd), then runs
+            % the exact plant path of step() (atmosphere -> aero -> RBD).
+            % Returns Xlon_dot = d/dt [u; w; q; theta] (rows [4;6;11;8] of dx).
+            engine        = U0(5:13);
+            engine(1:9)   = engine(1:9) + u_perturb(1:9);
+            surface       = [U0(1) - U0(2); U0(1) + U0(2); U0(3); U0(3); U0(4)];
+            surface(3)    = surface(3) + u_perturb(10);   % elevator -> LE
+            surface(4)    = surface(4) + u_perturb(10);   % elevator -> RE
+            surface(1)    = surface(1) + u_perturb(11);   % flap -> LA
+            surface(2)    = surface(2) + u_perturb(11);   % flap -> RA
+
+            [rho, a] = obj.environment.atmosphere(-x_full(3));
+            R_i2b = RSLQR.rotm_i2b(x_full(7), x_full(8), x_full(9));
+            v_air = obj.environment.airspeed_body(x_full(4:6), R_i2b);
+            x_aero = [v_air; x_full(10:12)];
+            [Fb, Mb] = run_LpC_aero(x_aero, engine, surface, rho, a, ...
+                                    obj.units, obj.vehicleConfig);
+            dx = obj.rigidBody.calculate_dynamics(x_full, Fb, Mb);
+            Xlon_dot = dx([4; 6; 11; 8]);
         end
 
         function out = run(obj)

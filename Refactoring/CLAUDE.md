@@ -29,14 +29,18 @@ Refactoring/
 │   ├── LpC_model_parameters.m# SACD L+C 파라미터 (참조/미러 원본)
 │   └── AeroPolynomial/       # 다항식 공력-추진 모델 (원본에서 복사)
 ├── controller/
-│   ├── RSLQR.m               # baseline 통합 RSLQR 이득스케줄 제어기
+│   ├── RSLQR.m               # baseline 통합 RSLQR 이득스케줄 제어기 (+ LON liveness 필터 배선)
+│   ├── LivenessFilter.m      # HJ-reachability liveness 필터 (LR + smooth-blend + toolbox-free QP)
+│   ├── ValueFunctionLUT.m    # BRT 값함수 로드·∇V·(UH,WH,x) 스케줄 보간
 │   └── trim_table_Poly_ConcatVer4p0.mat  # 트림표 + lon/lat 이득표
+├── tables/                   # (gitignore) trim/ 트림표, BRT/ 종방향 BRT 값함수 (WH3, UH1..20)
 ├── trajectory/
-│   └── ReferenceTrajectory.m # m-file 전용 궤적 생성기 (climb/althold, static build)
+│   └── ReferenceTrajectory.m # m-file 전용 궤적 생성기 (climb/althold/lon_brt_verify, static build)
 ├── config/
 │   ├── VehicleConfig.m       # 비행체 질량/관성/기하/프롭 배치 (slug·ft)
 │   ├── SimConfig.m           # dt = 0.01 s, T = 40 s, scenario 소유 + 궤적 로드
-│   └── RSLQRConfig.m         # LQR/할당 가중치 + 컨트롤러 dt (궤적표는 보유 안 함)
+│   ├── RSLQRConfig.m         # LQR/할당 가중치 + 컨트롤러 dt (궤적표는 보유 안 함)
+│   └── LivenessConfig.m      # liveness 필터 상수 + 채널 spec (helperOC BRT 정합, ft/rad)
 ├── utils/
 │   └── Units.m               # setUnits.m 의 클래스 래퍼 (단위 변환)
 └── docs/
@@ -91,9 +95,17 @@ Refactoring/
        이득 0.1 적용)
     4. `lon_ctrl` / `lat_ctrl` — 서보-보상기 적분 + LQR로 원하는 모멘트 `mdes` 산출
     5. `pseudo_alloc` — 가중 유사역행렬 할당 `M = W⁻¹Bᵀ(BW⁻¹Bᵀ)⁻¹`에 엔진/엘리베이터/플랩 한계 스케일링을
-       적용, 가상 자세 효과기 θ_v/φ_v 추출, 트림 `U0`를 더해 엔진/조종면 명령 생성.
+       적용, **scale_factor 리미팅 후 `act_lon(1:11)`을 `liveness_lon.filter`로 사영**(LON liveness 필터,
+       커버리지 밖·mode 'off'면 pass-through), 가상 자세 효과기 θ_v/φ_v 추출, 트림 `U0`를 더해 명령 생성.
   트림 입력 순서: `U0 = [flap; ail; ele; rud; eng1..9]`. `rotm_i2b`/`rotm_b2i`는 정적(static) 회전행렬
   유틸리티(3-2-1 Euler, NED↔body).
+- `Refactoring/controller/LivenessFilter.m` / `ValueFunctionLUT.m` — HJ-reachability liveness 필터
+  (AIAA liveness 논문 §IV; 상세 [`docs/refs/liveness-filter.md`](../docs/refs/liveness-filter.md)).
+  `LivenessFilter`는 LR(eq.15)·smooth-blending(eq.20) + toolbox-free box+halfspace QP.
+  `ValueFunctionLUT`는 `tables/BRT/`의 종방향 BRT 값함수를 로드해 `(UH,WH,x)`에서 `V`·`∇V` 보간.
+  **단위 ft/rad**(helperOC 시각화의 m/deg 스케일 미적용). RSLQR 생성자가 `liveness_lon`(기본 mode
+  'blend')을 소유하며 LON만 배선(LAT는 코드 지원·미배선). **한계**: 현 LON BRT는 WH3(하강)뿐 → althold
+  (WH1–2)에선 상시 pass-through. 폐루프 개입 검증은 보류(ADR-0002 참조: WH3는 baseline이 섭동에 불안정).
 - `Refactoring/config/VehicleConfig.m` — SACD L+C 질량/관성/기하/프롭 배치(slug·ft). `LpC_model_parameters.m`을
   `Constant` 프로퍼티로 옮기고, 생성자에서 프롭 hub 회전행렬(`Prop_R_BH`)·회전축 단위벡터(`Prop_rot_axis_e`)·
   추력 방향(`p_T_e`)·역관성(`inv_I`)을 계산한다. 아래 두 방식으로 공력 모델의 `Model` 인자로 전달된다.
@@ -120,6 +132,4 @@ Refactoring/
 
 알려진 특성: 위치 추종에 유계(bounded) 지연/오버슈트(북쪽 최대 ~40 ft)가 나타난다. 이는 기준 위치(구간별
 선형)와 속도(램프)가 상호 불일치하고 외루프 위치 이득이 약하기(0.1) 때문이며, 원본 시뮬레이션의 거동과
-일치하는 것으로 버그가 아니다. (`climb`의 위치/속도 불일치가 그 예. `althold`는 크루즈 고도를 일관되게 만든
-버전.) `AeroPolynomial/poly_aero_wrapper_Mod.m`(및 `_du.m`)는 오프라인
-선형화 도구이며 런타임에는 사용되지 않는다.
+일치하는 것으로 버그가 아니다.
