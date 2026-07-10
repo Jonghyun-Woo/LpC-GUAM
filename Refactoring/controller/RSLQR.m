@@ -319,12 +319,13 @@ classdef RSLQR < handle
             end
 
             %% Longitudinal liveness filter (behind nominal allocation).
+            u_lon_nom = act_lon(1:11);  % nominal allocation before liveness filter
             uhA = state(4);
             uhA = max(obj.UH(1), min(obj.UH(end), uhA));
             whA        = obj.liveness_wh_anchor;
-            [X0a, U0a] = obj.interp_xu0(uhA, whA);
-            Ap_a       = obj.interp_mtrx(obj.LON.Ap, uhA, whA);
-            Bp_a       = obj.interp_mtrx(obj.LON.Bp, uhA, whA);
+            [X0a, U0a] = obj.interp_xu0(uhA, whA); % Anchor trim state and input
+            Ap_a       = obj.interp_mtrx(obj.LON.Ap, uhA, whA); % Linear dynamics at anchor trim
+            Bp_a       = obj.interp_mtrx(obj.LON.Bp, uhA, whA); % Linear dynamics at anchor trim
             % perturbation state relative to the anchor trim [u; w; q; theta]
             x_anchor   = [state(4)  - X0a(1); ...
                           state(6)  - X0a(3); ...

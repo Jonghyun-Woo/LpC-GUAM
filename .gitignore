@@ -10,4 +10,5 @@ docs/refs
 *.mat
 
 # Test Scripts
-Refactoring/tests
+Refactoring/tests/*
+!Refactoring/tests/diag_e3_intervention.m
