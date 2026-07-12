@@ -5,6 +5,9 @@ CLAUDE.md
 CLAUDE.local.md
 
 *slprj/
+*.asv
+*.slx.r*
+*.slxc
 
 # Local planning artifacts (not shared)
 plans/
