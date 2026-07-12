@@ -319,24 +319,70 @@ classdef RSLQR < handle
             end
 
             %% Longitudinal liveness filter (behind nominal allocation).
+            c_brt_info = struct();
+            n_brt_info = struct();
+
+            u_idx        = obj.liveness_lon.spec.U0_idx;
             u_lon_nom = act_lon(1:11);  % nominal allocation before liveness filter
             uhA = state(4);
             uhA = max(obj.UH(1), min(obj.UH(end), uhA));
-            whA        = obj.liveness_wh_anchor;
-            [X0a, U0a] = obj.interp_xu0(uhA, whA); % Anchor trim state and input
-            Ap_a       = obj.interp_mtrx(obj.LON.Ap, uhA, whA); % Linear dynamics at anchor trim
-            Bp_a       = obj.interp_mtrx(obj.LON.Bp, uhA, whA); % Linear dynamics at anchor trim
+            [~, current_uhA_id] = min(abs(obj.UH - uhA));
+            next_uhA_id = min(length(obj.UH), current_uhA_id + 1);
+            
+            % current_state
+            c_uhA = obj.UH(current_uhA_id);
+            c_whA          = obj.liveness_wh_anchor;
+            [c_X0a, c_U0a] = obj.interp_xu0(c_uhA, c_whA); % Anchor trim state and input
+            c_Ap_a         = obj.interp_mtrx(obj.LON.Ap, c_uhA, c_whA); % Linear dynamics at anchor trim
+            c_Bp_a         = obj.interp_mtrx(obj.LON.Bp, c_uhA, c_whA); % Linear dynamics at anchor trim
             % perturbation state relative to the anchor trim [u; w; q; theta]
-            x_anchor   = [state(4)  - X0a(1); ...
-                          state(6)  - X0a(3); ...
-                          state(11) - X0a(5); ...
-                          state(8)  - X0a(11)];
-            idx        = obj.liveness_lon.spec.U0_idx;
-            dtrim      = U0(idx) - U0a(idx);          % 11x1 effector trim offset
-            u_anchor_nom  = u_lon_nom + dtrim;        % mission frame -> anchor frame
-            u_anchor_f    = obj.liveness_lon.filter(x_anchor, u_anchor_nom, ...
-                                Ap_a, Bp_a, U0a, uhA, whA, state);
-            act_lon(1:11) = u_anchor_f - dtrim;       % anchor frame -> mission frame
+            c_x_anchor     = [state(4)  - c_X0a(1); ...
+                              state(6)  - c_X0a(3); ...
+                              state(11) - c_X0a(5); ...
+                              state(8)  - c_X0a(11)];
+            c_dtrim      = U0(u_idx) - c_U0a(u_idx);          % 11x1 effector trim offset
+            c_u_anchor_nom  = u_lon_nom + c_dtrim;        % mission frame -> anchor frame
+
+            c_brt_info.uhA = c_uhA;
+            c_brt_info.whA = c_whA;
+            c_brt_info.X0a = c_X0a;
+            c_brt_info.U0a = c_U0a;
+            c_brt_info.Ap_a = c_Ap_a;
+            c_brt_info.Bp_a = c_Bp_a;
+            c_brt_info.x_anchor = c_x_anchor;
+            c_brt_info.dtrim = c_dtrim;
+            c_brt_info.u_anchor_nom = c_u_anchor_nom;
+            c_brt_info.idx = current_uhA_id;
+            c_brt_info.name = 'current';
+
+            % next_state
+            n_uhA = obj.UH(next_uhA_id);
+            n_whA          = obj.liveness_wh_anchor;
+            [n_X0a, n_U0a] = obj.interp_xu0(n_uhA, n_whA); % Anchor trim state and input
+            n_Ap_a         = obj.interp_mtrx(obj.LON.Ap, n_uhA, n_whA); % Linear dynamics at anchor trim
+            n_Bp_a         = obj.interp_mtrx(obj.LON.Bp, n_uhA, n_whA); % Linear dynamics at anchor trim
+            % perturbation state relative to the anchor trim [u; w; q; theta]
+            n_x_anchor     = [state(4)  - n_X0a(1); ...
+                              state(6)  - n_X0a(3); ...
+                              state(11) - n_X0a(5); ...
+                              state(8)  - n_X0a(11)];
+            n_dtrim      = U0(u_idx) - n_U0a(u_idx);          % 11x1 effector trim offset
+            n_u_anchor_nom  = u_lon_nom + n_dtrim;            % mission frame -> anchor frame
+
+            n_brt_info.uhA = n_uhA;
+            n_brt_info.whA = n_whA;
+            n_brt_info.X0a = n_X0a;
+            n_brt_info.U0a = n_U0a;
+            n_brt_info.Ap_a = n_Ap_a;
+            n_brt_info.Bp_a = n_Bp_a;
+            n_brt_info.x_anchor = n_x_anchor;
+            n_brt_info.dtrim = n_dtrim;
+            n_brt_info.u_anchor_nom = n_u_anchor_nom;
+            n_brt_info.idx = next_uhA_id;
+            n_brt_info.name = 'next';
+
+            [u_anchor_f, info]    = obj.liveness_lon.filter(c_brt_info, n_brt_info, state);
+            act_lon(1:11) = u_anchor_f - info.target_dtrim;
 
             % Parse out the effector allocations
             u_lon       = act_lon(1:end-1);
@@ -363,12 +409,6 @@ classdef RSLQR < handle
             mdes_lat = obj.lat_ctrl(ctrl_lat, Xlat_cmd, Xlat);
 
             [engine, surface] = obj.pseudo_alloc(U0, ctrl_lon, ctrl_lat, mdes_lon, mdes_lat, Xlon, u_cmd, w_cmd, state);
-        end
-
-        function set_liveness_dynamics(obj, fdyn)
-            if ~isempty(obj.liveness_lon)
-                obj.liveness_lon.fdyn = fdyn;
-            end
         end
 
         function reset(obj)

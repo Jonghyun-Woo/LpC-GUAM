@@ -31,13 +31,13 @@ classdef LpC_GUAM < handle
     end
 
     methods
-        function obj = LpC_GUAM(scenario)
+        function obj = LpC_GUAM(scenario, target_vel)
             if nargin < 1 || isempty(scenario)
                 scenario = 'althold';
             end
             obj.vehicleConfig   = VehicleConfig();
             obj.simConfig       = SimConfig(scenario);
-            obj.refTraj         = obj.simConfig.getReferenceTrajectory();
+            obj.refTraj         = obj.simConfig.getReferenceTrajectory(target_vel);
             obj.units           = Units('ft', 'slug');
 
             obj.rigidBody       = RBD(obj.vehicleConfig);
@@ -46,10 +46,6 @@ classdef LpC_GUAM < handle
             obj.controller      = RSLQR();
             obj.engineDynamics  = EngineDynamics(obj.simConfig.dt);
             obj.surfaceDynamics = SurfaceDynamics(obj.simConfig.dt);
-
-            % Give the LON liveness filter a handle to the true plant rate so
-            % it can evaluate a nonlinear dV/dt (rate_mode 'nonlinear').
-            obj.controller.set_liveness_dynamics(@obj.lon_plant_rate);
 
             obj.reset();
         end

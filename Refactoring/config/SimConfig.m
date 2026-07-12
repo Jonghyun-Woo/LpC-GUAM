@@ -17,9 +17,9 @@ classdef SimConfig < handle
             obj.scenario = scenario;
         end
 
-        function ref = getReferenceTrajectory(obj)
+        function ref = getReferenceTrajectory(obj, target_vel)
             % Load the reference trajectory table for the configured scenario.
-            ref = ReferenceTrajectory.build(obj.scenario, obj.dt, obj.T);
+            ref = ReferenceTrajectory.build(obj.scenario, obj.dt, obj.T, target_vel);
         end
 
         function display_simulation_config(obj)
