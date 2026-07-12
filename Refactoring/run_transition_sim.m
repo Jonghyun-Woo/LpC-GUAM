@@ -1,7 +1,10 @@
 % run_transition_sim - Flat-earth m-code port of the GUAM hover-to-cruise
-% transition demo (Exec_Scripts/exam_TS_Hover2Cruise_traj.m):
+% transition demo. Common to both scenarios:
 %   0-20 s : vertical climb 0 -> 80 ft (initial climb rate 8 ft/s)
-%   20-40 s: accelerate to 15 ft/s forward flight, climb to 100 ft
+%   20-40 s: accelerate to 15 ft/s forward flight
+% Cruise altitude depends on the scenario:
+%   'althold' (default) : hold 80 ft through cruise
+%   'climb'             : keep climbing to 100 ft (original)
 %
 % Usage: run this script from anywhere; it adds Refactoring/ to the path,
 % runs the closed-loop simulation, and plots results vs. the reference.
@@ -9,7 +12,8 @@
 here = fileparts(mfilename('fullpath'));
 addpath(genpath(here));
 
-guam = LpC_GUAM();
+scenario = 'althold';   % 'althold' (cruise altitude hold, default) | 'climb' (original)
+guam = LpC_GUAM(scenario);
 out  = guam.run();
 
 %% Plots

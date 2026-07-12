@@ -13,8 +13,10 @@ classdef RSLQR < handle
 
     properties
         cfg       % RSLQRConfig (weights and dimension constants)
-        UH        % N_trim x 1  heading-frame x-velocity breakpoints [ft/s]
-        WH        % M_trim x 1  heading-frame z-velocity breakpoints [ft/s]
+        UH        % N_trim x 1  body-frame x-velocity (u) breakpoints [ft/s]
+        WH        % M_trim x 1  body-frame z-velocity (w) breakpoints [ft/s]
+                  % (verified: WH == XU0(3)=body w exactly; NOT heading/inertial.
+                  %  At cruise pitch, body w>0 is ~level flight, not descent.)
         XU0
         LON       % 1x(N*M*L) struct array — longitudinal gains per schedule point
         LAT       % 1x(N*M*L) struct array — lateral gains per schedule point
@@ -24,6 +26,9 @@ classdef RSLQR < handle
 
         phi_v
         theta_v
+
+        liveness_lon   % LivenessFilter (longitudinal) behind nominal allocation
+        liveness_wh_anchor = []
     end
 
     methods
@@ -34,7 +39,7 @@ classdef RSLQR < handle
             % trim_table_Poly_ConcatVer4p0.mat must be on the MATLAB path.
 
             obj.cfg = RSLQRConfig;
-            S = load('trim_table_Poly_ConcatVer4p0.mat');
+            S = load('tables/trim/trim_table_Poly_ConcatVer4p0.mat');
             obj.XU0 = S.XU0_interp;
             obj.UH  = S.UH;
             obj.WH  = S.WH;
@@ -68,6 +73,14 @@ classdef RSLQR < handle
 
             obj.phi_v = 0;
             obj.theta_v = 0;
+
+            % Longitudinal liveness filter (production channel). Loads BRT
+            % value functions from LivenessConfig.tables_dir_default; passes
+            % through when tables are absent or (uh,wh) is outside coverage.
+            % Default mode 'blend' (smooth blending). Callers may override
+            % obj.liveness_lon.mode ('blend' | 'lr' | 'off').
+            obj.liveness_lon = LivenessFilter('lon', 'blend', ...
+                LivenessConfig.tables_dir_default, obj.UH, obj.WH);
         end
 
         function [iU, kU, iW, kW] = lookup_breakpt(obj, uh_curr, wh_curr)
@@ -254,8 +267,8 @@ classdef RSLQR < handle
                        rud_cmd] + srf_0;
         end
 
-        function [engine, surface] = pseudo_alloc(obj, U0, ctrl_lon, ctrl_lat, mdes_lon, mdes_lat)
-            % Weighted pseudo-inverse allocation: M = W^-1 B' (B W^-1 B')^-1
+        function [engine, surface] = pseudo_alloc(obj, U0, ctrl_lon, ctrl_lat, mdes_lon, mdes_lat, Xlon, uh, wh, state)
+            %% Weighted pseudo-inverse allocation: M = W^-1 B' (B W^-1 B')^-1
             M_lon = (ctrl_lon.W \ ctrl_lon.B') / (ctrl_lon.B * (ctrl_lon.W \ ctrl_lon.B'));
             M_lat = (ctrl_lat.W \ ctrl_lat.B') / (ctrl_lat.B * (ctrl_lat.W \ ctrl_lat.B'));
 
@@ -305,6 +318,26 @@ classdef RSLQR < handle
                 act_lon = M_lon*mdes_lon*scale_factor;
             end
 
+            %% Longitudinal liveness filter (behind nominal allocation).
+            u_lon_nom = act_lon(1:11);  % nominal allocation before liveness filter
+            uhA = state(4);
+            uhA = max(obj.UH(1), min(obj.UH(end), uhA));
+            whA        = obj.liveness_wh_anchor;
+            [X0a, U0a] = obj.interp_xu0(uhA, whA); % Anchor trim state and input
+            Ap_a       = obj.interp_mtrx(obj.LON.Ap, uhA, whA); % Linear dynamics at anchor trim
+            Bp_a       = obj.interp_mtrx(obj.LON.Bp, uhA, whA); % Linear dynamics at anchor trim
+            % perturbation state relative to the anchor trim [u; w; q; theta]
+            x_anchor   = [state(4)  - X0a(1); ...
+                          state(6)  - X0a(3); ...
+                          state(11) - X0a(5); ...
+                          state(8)  - X0a(11)];
+            idx        = obj.liveness_lon.spec.U0_idx;
+            dtrim      = U0(idx) - U0a(idx);          % 11x1 effector trim offset
+            u_anchor_nom  = u_lon_nom + dtrim;        % mission frame -> anchor frame
+            u_anchor_f    = obj.liveness_lon.filter(x_anchor, u_anchor_nom, ...
+                                Ap_a, Bp_a, U0a, uhA, whA, state);
+            act_lon(1:11) = u_anchor_f - dtrim;       % anchor frame -> mission frame
+
             % Parse out the effector allocations
             u_lon       = act_lon(1:end-1);
             obj.theta_v = act_lon(end);
@@ -329,16 +362,23 @@ classdef RSLQR < handle
             mdes_lon = obj.lon_ctrl(ctrl_lon, Xlon_cmd, Xlon);
             mdes_lat = obj.lat_ctrl(ctrl_lat, Xlat_cmd, Xlat);
 
-            [engine, surface] = obj.pseudo_alloc(U0, ctrl_lon, ctrl_lat, mdes_lon, mdes_lat);
+            [engine, surface] = obj.pseudo_alloc(U0, ctrl_lon, ctrl_lat, mdes_lon, mdes_lat, Xlon, u_cmd, w_cmd, state);
+        end
+
+        function set_liveness_dynamics(obj, fdyn)
+            if ~isempty(obj.liveness_lon)
+                obj.liveness_lon.fdyn = fdyn;
+            end
         end
 
         function reset(obj)
-            % Zero the servo-compensator integrators and virtual attitude
-            % allocation states (call before starting a new run).
             obj.ctrl_lon_i = zeros(3, 1);
             obj.ctrl_lat_i = zeros(3, 1);
             obj.phi_v   = 0;
             obj.theta_v = 0;
+            if ~isempty(obj.liveness_lon)
+                obj.liveness_lon.reset_counters();
+            end
         end
     end % methods
 
