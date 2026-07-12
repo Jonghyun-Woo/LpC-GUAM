@@ -1,3 +1,9 @@
+# Ignore Claude settings
+.vscode/
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+
 *slprj/
 
 # Local planning artifacts (not shared)
