@@ -31,13 +31,13 @@ classdef LpC_GUAM < handle
     end
 
     methods
-        function obj = LpC_GUAM(scenario, target_vel)
+        function obj = LpC_GUAM(scenario, cfg)
             if nargin < 1 || isempty(scenario)
                 scenario = 'althold';
             end
             obj.vehicleConfig   = VehicleConfig();
-            obj.simConfig       = SimConfig(scenario);
-            obj.refTraj         = obj.simConfig.getReferenceTrajectory(target_vel);
+            obj.simConfig       = SimConfig(scenario, cfg);
+            obj.refTraj         = obj.simConfig.getReferenceTrajectory(cfg);
             obj.units           = Units('ft', 'slug');
 
             obj.rigidBody       = RBD(obj.vehicleConfig);

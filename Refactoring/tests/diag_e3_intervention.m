@@ -11,11 +11,12 @@ cd('C:\Users\grape4314\OneDrive\CAU\AISL\LpC-GUAM');
 % Trim Table setting
 S = load('tables/trim/trim_table_Poly_ConcatVer4p0.mat');
 % Environment Parameters
-cfg.M        = 4000;        % Total simulation steps
+cfg.M        = 10000;        % Total simulation steps
 cfg.whAnchor = S.WH(3);     % WH for calling trim table in perspective of BRT
-cfg.target_vel = 40.0;       % Target velocity related to reference generator
+cfg.target_vel = 150.0;       % Target velocity related to reference generator
 cfg.gamma    = 5.0;         % Sensitivity of the Class-K function
 cfg.margin   = 0.001;         % CBF margin for zero-hold effect
+cfg.decimation = 8;         % Reference gervenor decimation
 cfg.makePlots = true;       % Save plot  
 cfg.showPlots = true;       % Show plots
 cfg.plotDir   = fullfile(pwd, 'diag_plots', 'full_guam_caseA_currentU_linear');
@@ -30,7 +31,7 @@ end
 cfg.clipUH   = true;
 
 % Initial perturbation condition (off-trim state)
-perts = {11, 0.0,        'q=0.0'};
+perts = {11, 0.15,        'q=0.15'};
 
 fprintf('\nFull GUAM Case A: current-u + WH3-anchor, linear rate\n');
 fprintf('WH3 anchor = %.6f ft/s, gamma=%.2f, margin=%.3g, clipUH=%d\n\n', cfg.whAnchor, cfg.gamma, cfg.margin, cfg.clipUH);
@@ -57,7 +58,8 @@ for p = 1:size(perts, 1)
         if cfg.makePlots
             % Save log file
             plot_full_guam_trace(R.trace, cfg, name, md);
-            traceFile = fullfile(cfg.plotDir, sanitize_filename(sprintf('trace_%s_%s_ref_%.1f.mat', name, md, cfg.target_vel)));
+            traceFile = fullfile(cfg.plotDir, ...
+                sanitize_filename(sprintf('trace_%s_%s_ref_%.1f_dec_%d.mat', name, md, cfg.target_vel, cfg.decimation)));
             save(traceFile, 'R', 'cfg');
         end
     end
@@ -66,7 +68,7 @@ end
 
 % -------------------------------------------------------------------------
 function R = run_case(idx, val, onoff, cfg)
-    g = LpC_GUAM('lon_brt_verify', cfg.target_vel);
+    g = LpC_GUAM('lon_brt_verify', cfg);
     f = g.controller.liveness_lon;
 
     % Config defaults used only inside diagnostics.
@@ -130,10 +132,12 @@ function R = run_case(idx, val, onoff, cfg)
     dVerrDen = 0;
 
     for k = 1:cfg.M
-        ref.pos     = rt.pos(:, k);
-        ref.vel     = rt.vel(:, k);
-        ref.chi     = rt.chi(k);
-        ref.chi_dot = rt.chidot(k);
+        if mod(k-1, cfg.decimation) == 0
+            ref.pos     = rt.pos(:, k);
+            ref.vel     = rt.vel(:, k);
+            ref.chi     = rt.chi(k);
+            ref.chi_dot = rt.chidot(k);
+        end
 
         statePre = g.state(:);
 

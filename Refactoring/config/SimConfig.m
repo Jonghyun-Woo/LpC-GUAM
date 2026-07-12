@@ -8,18 +8,15 @@ classdef SimConfig < handle
     end
 
     methods
-        function obj = SimConfig(scenario)
+        function obj = SimConfig(scenario, cfg)
             obj.dt = 0.01;  % Time step (s)
-            obj.T = 40;     % Total simulation time (s)
-            if nargin < 1 || isempty(scenario)
-                scenario = 'althold';
-            end
+            obj.T = cfg.M*obj.dt;     % Total simulation time (s)
             obj.scenario = scenario;
         end
 
-        function ref = getReferenceTrajectory(obj, target_vel)
+        function ref = getReferenceTrajectory(obj, cfg)
             % Load the reference trajectory table for the configured scenario.
-            ref = ReferenceTrajectory.build(obj.scenario, obj.dt, obj.T, target_vel);
+            ref = ReferenceTrajectory.build(obj.scenario, obj.dt, obj.T, cfg.target_vel);
         end
 
         function display_simulation_config(obj)
