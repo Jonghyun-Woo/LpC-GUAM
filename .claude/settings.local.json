@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(matlab -batch \"addpath\\(genpath\\('Refactoring'\\)\\); run\\('Refactoring/tests/verify_reference_trajectory.m'\\)\")",
-      "Bash(matlab -batch \"run\\('C:/Users/grape/AppData/Local/Temp/claude/C--Users-grape-OneDrive-CAU-AISL-LpC-GUAM/ff82156d-add4-483c-9e9d-fc047d41935a/scratchpad/diag_baseline_wh3.m'\\)\")"
-    ]
-  }
-}
