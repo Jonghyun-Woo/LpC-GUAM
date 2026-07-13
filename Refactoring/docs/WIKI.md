@@ -396,6 +396,51 @@ favors rotors/attitude at hover and low speed.
 The controller integrators, servos, and EOM all use Δt = 0.01 s forward Euler
 (`RSLQRConfig.dt = SimConfig.dt`).
 
+### 7.6 Longitudinal Liveness Filter (HJ Reachability)
+
+A liveness filter (`LivenessFilter.m` + `ValueFunctionLUT.m`) runs *behind* the
+nominal RSLQR allocation, projecting the longitudinal effector perturbation
+`act_lon(1:11)` onto a set of liveness-ensuring controls derived from a
+Backward Reachable Tube (BRT) value function `V(x)`. Theory and the full
+distillation of paper §IV are in
+[`docs/refs/liveness-filter.md`](../../docs/refs/liveness-filter.md); the
+design decision log is **ADR-0002**.
+
+- **State/control match**: the BRT state `x=[u,w,q,θ]` (perturbation from trim)
+  equals RSLQR `Xlon`; the BRT control `[Π1..8,Π9,δe,δf]` equals `act_lon(1:11)`
+  (the virtual attitude effector `act_lon(12)=θ_v` is not filtered).
+- **Control-affine specialization** (converged `V ⇒ DtV=0`, `d*=0`):
+  `dV/dt = α + β'u`, `α = ∇V·(A_lon x)`, `β = (∇V·B_lon)'`, with
+  `A_lon,B_lon = ctrl_lon.Ap,Bp`.
+- **Filters**: Least-Restrictive (eq.15, banded boundary `V≥−eps_band`) and
+  Smooth Blending (eq.20, CBF-like QP `β'u ≤ −γV − α`, `γ=5.0`). The QP is a
+  toolbox-free box+halfspace dual bisection.
+- **UNITS**: everything is ft/s, rad/s, rad. The `*_scale` (m, deg) factors in
+  helperOC `visualize_*_tube.m` are **visualization-only** and are NOT applied
+  to the value-function grid.
+- **Scheduling / coverage**: `ValueFunctionLUT` auto-parses `(UH,WH)` indices
+  from the BRT files present in `tables/BRT/`, interpolates across UH, and
+  returns `ok=false` outside coverage (⇒ filter passes through).
+- **WH3-only limitation**: the current LON BRT covers only WH3. Note `UH/WH` are
+  **body-frame** velocities `u,w` (verified: `WH == XU0(3)=body w`, NOT
+  heading/inertial), so `WH3=+11.67` is a vertical descent at hover but ~level
+  flight at cruise (trim θ≈5° projects body-w into forward motion). althold
+  cruise (WH1–2, w≈−8…0) is outside coverage, so the filter passes through in
+  althold (bit-identical to filter-off — verified).
+- **Closed-loop status (root cause found, 2026-07-09)**: the filter math and
+  integration are verified (Steps 1–6; `tests/verify_liveness_*.m`), and on the
+  *linear* model `ẋ=A_lon·x+B_lon·u` the blend filter keeps `V≤0` (works). But
+  on the true *nonlinear* plant the filter does not help: the linear
+  `dV/dt=α+β'u` disagrees in sign with the actual `dV/dt` under a pitch-rate
+  upset — `∇V` is θ-dominated and `dθ/dt=q` is pure kinematics (relative degree
+  2, no direct control), so V rises while the filter (deep inside Glive, large
+  `−γV` budget) stays inactive, then escapes before control can arrest q. Root
+  cause: **the linear trim BRT is not a valid liveness certificate for the
+  nonlinear plant** (implementation itself is correct; BRT model = filter model,
+  @GUAM_LON.m:40-41). Fixes (separate work): regenerate the BRT with nonlinear
+  reachability, or make the filter use the true nonlinear `∇V·f(x,u)`. See
+  ADR-0002 and `plans/guam-liveness-filter.md` Step 6.5.
+
 ---
 
 ## 8. Simulation Scenario and How to Run

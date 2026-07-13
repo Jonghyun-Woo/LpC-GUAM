@@ -1,1 +1,28 @@
+# Ignore Claude settings
+.vscode/
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+
 *slprj/
+*.asv
+*.slx.r*
+*.slxc
+
+# Local planning artifacts (not shared)
+plans/
+
+# Reference papers: keep PDFs local (binary bloat + copyright), commit only the distilled .md notes
+docs/refs
+
+# MAT files: keep local, commit only distilled .md notes
+*.mat
+
+# .md
+*.md
+!WIKI.md
+!README.md
+
+# Test Scripts
+Refactoring/tests/*
+!Refactoring/tests/diag_e3_intervention.m
