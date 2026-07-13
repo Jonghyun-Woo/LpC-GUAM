@@ -5,8 +5,8 @@
 %   under off-trim initial perturbations.
 close all; clear all;
 
-addpath(genpath('C:\Users\grape4314\OneDrive\CAU\AISL\LpC-GUAM\Refactoring'));
-cd('C:\Users\grape4314\OneDrive\CAU\AISL\LpC-GUAM');
+addpath(genpath('C:\Users\grape\OneDrive\CAU\AISL\LpC-GUAM\Refactoring'));
+cd('C:\Users\grape\OneDrive\CAU\AISL\LpC-GUAM');
 
 % Trim Table setting
 S = load('tables/trim/trim_table_Poly_ConcatVer4p0.mat');
@@ -16,7 +16,7 @@ cfg.whAnchor = S.WH(3);     % WH for calling trim table in perspective of BRT
 cfg.target_vel = 150.0;       % Target velocity related to reference generator
 cfg.gamma    = 5.0;         % Sensitivity of the Class-K function
 cfg.margin   = 0.001;         % CBF margin for zero-hold effect
-cfg.decimation = 8;         % Reference gervenor decimation
+cfg.decimation = 1;         % Reference gervenor decimation
 cfg.makePlots = true;       % Save plot  
 cfg.showPlots = true;       % Show plots
 cfg.plotDir   = fullfile(pwd, 'diag_plots', 'full_guam_caseA_currentU_linear');
@@ -31,7 +31,7 @@ end
 cfg.clipUH   = true;
 
 % Initial perturbation condition (off-trim state)
-perts = {11, 0.15,        'q=0.15'};
+perts = {11, 0.0,        'q=0.0'};
 
 fprintf('\nFull GUAM Case A: current-u + WH3-anchor, linear rate\n');
 fprintf('WH3 anchor = %.6f ft/s, gamma=%.2f, margin=%.3g, clipUH=%d\n\n', cfg.whAnchor, cfg.gamma, cfg.margin, cfg.clipUH);
