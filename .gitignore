@@ -20,6 +20,7 @@ docs/refs
 
 # .md
 *.md
+!WIKI.md
 !README.md
 
 # Test Scripts
