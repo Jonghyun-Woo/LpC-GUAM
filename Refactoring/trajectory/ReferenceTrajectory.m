@@ -16,7 +16,7 @@ classdef ReferenceTrajectory
     % of the inertial velocity into the heading frame before returning.
 
     methods (Static)
-        function ref = build(scenario, dt, T)
+        function ref = build(scenario, dt, T, target_vel)
             % BUILD reference trajectory table for a scenario.
             %   scenario : 'althold' (default) | 'climb'
             %   dt, T    : time grid parameters (from SimConfig)
@@ -47,10 +47,10 @@ classdef ReferenceTrajectory
             if strcmp(scenario, 'lon_brt_verify')
                 pos = zeros(3, N);
                 vel = zeros(3, N);
-                vel(1, :) = linspace(17, 59, N);    % forward speed sweep across UH tables
+                vel(1, :) = linspace(0, target_vel, N);    % forward speed sweep across UH tables
                 vel(3, :) = 0;                      % level flight (altitude hold)
                 pos(1, :) = cumtrapz(time, vel(1, :));
-                pos(3, :) = -300 * ones(1, N);      % hold 300 ft up
+                pos(3, :) = -80 * ones(1, N);      % hold 80 ft up
                 ref = struct('time',   time, ...
                              'pos',    pos, ...
                              'vel',    vel, ...
