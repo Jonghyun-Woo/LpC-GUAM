@@ -10,10 +10,19 @@
 % runs the closed-loop simulation, and plots results vs. the reference.
 
 here = fileparts(mfilename('fullpath'));
-addpath(genpath(here));
+addpath(genpath(pwd));
 
 scenario = 'althold';   % 'althold' (cruise altitude hold, default) | 'climb' (original)
-guam = LpC_GUAM(scenario);
+cfg.M          = 4000;  % sim steps -> T = M*dt = 40 s (0-20 s climb, 20-40 s cruise)
+cfg.target_vel = 15;    % cruise forward speed [ft/s] (unused by 'althold' reference build)
+guam = LpC_GUAM(scenario, cfg);
+
+% Transition demo runs the nominal RSLQR allocation only (no CBF liveness
+% intervention). The allocation frame code in RSLQR.pseudo_alloc still needs
+% a valid WH anchor even with the filter off, so set both here.
+guam.controller.liveness_lon.mode  = 'off';
+guam.controller.liveness_wh_anchor = guam.controller.WH(3);
+
 out  = guam.run();
 
 %% Plots
