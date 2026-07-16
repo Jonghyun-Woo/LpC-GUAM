@@ -9,7 +9,7 @@ addpath(genpath('C:\Users\grape\OneDrive\CAU\AISL\LpC-GUAM\Refactoring'));
 cd('C:\Users\grape\OneDrive\CAU\AISL\LpC-GUAM');
 
 % Trim Table setting
-S = load('tables/trim/trim_table_Poly_ConcatVer4p0.mat');
+S = load('trim_table_Poly_ConcatVer4p0.mat');
 % Environment Parameters
 cfg.M        = 10000;        % Total simulation steps
 cfg.whAnchor = S.WH(3);     % WH for calling trim table in perspective of BRT
