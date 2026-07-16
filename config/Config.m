@@ -9,6 +9,7 @@ classdef Config < handle
     %   cfg.sim        : SimConfig        (dt, M, T, scenario)
     %   cfg.vehicle    : VehicleConfig    (mass/geometry)
     %   cfg.controller : ControllerConfig (target_vel, refTraj, rslqr, filter)
+    %   cfg.logger     : LoggerConfig     (logging/plot/save options)
     %
     % overrides (optional struct) fields and destinations:
     %   .M, .dt          -> SimConfig
@@ -19,6 +20,7 @@ classdef Config < handle
         sim         % SimConfig
         vehicle     % VehicleConfig
         controller  % ControllerConfig
+        logger      % LoggerConfig
     end
 
     methods
@@ -31,6 +33,7 @@ classdef Config < handle
             obj.vehicle    = VehicleConfig();
             obj.controller = ControllerConfig(obj.sim.scenario, ...
                                               obj.sim.dt, obj.sim.T, overrides);
+            obj.logger     = LoggerConfig(overrides);
         end
     end
 end

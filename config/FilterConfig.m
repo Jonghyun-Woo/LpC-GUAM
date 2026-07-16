@@ -59,7 +59,7 @@ classdef FilterConfig < handle
                     spec.grid_max   = [16; 33; 1.5; 0.75];
                     spec.grid_num   = [21; 41; 61; 31];
                     spec.target_ub  = [3; 1.5; 0.05; 0.05];
-                    spec.brt_prefix = 'GUAM_LON_BRT';
+                    spec.brt_prefix = 'GUAM_LON_HJIR';
                     spec.nu         = 11;                    % [Pi_1..8, Pi_9(pusher), delta_e, delta_f]
                     spec.U0_idx     = [5:12, 13, 3, 1];      % lift1..8, pusher, elevator, flap
                     % Effector type per filter slot: 8x lift, 1x push, 2x surface

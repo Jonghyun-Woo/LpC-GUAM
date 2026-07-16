@@ -114,6 +114,11 @@ classdef LivenessFilter < handle
                 'quadprog_exitflag', NaN ...
             );
 
+            % Diagnostic-only: expose the per-effector perturbation bounds so
+            % downstream logging/plots can draw them. Does not affect control.
+            info.lb = lb;
+            info.ub = ub;
+
             % ---------------------------------------------------------------------
             % OFF mode: preserve nominal input in the selected frame.
             % ---------------------------------------------------------------------
