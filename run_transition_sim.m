@@ -10,10 +10,6 @@
 %
 % Pipeline: assemble a central Config -> LpC_GUAM(cfg) -> run the explicit
 % closed-loop step loop (local run_once) -> SimLogger buffers, plots, saves.
-% When the liveness filter is enabled (params.filter_mode ~= 'off'), the
-% script additionally runs a filter-OFF companion and overlays the filtered
-% vs. nominal trajectory on the LON BRT corridor (replacing diag_e3_*).
-% Run this script from anywhere; it adds the repo to the path.
 clear all; close all;
 here = fileparts(mfilename('fullpath'));
 addpath(genpath(here));
