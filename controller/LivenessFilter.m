@@ -30,14 +30,14 @@ classdef LivenessFilter < handle
 
     methods
         function obj = LivenessFilter(channel, mode, tables_dir, uh_bp, wh_bp)
-            obj.spec        = LivenessConfig.channelSpec(channel);
+            obj.spec        = FilterConfig.channelSpec(channel);
             obj.mode        = lower(mode);
-            obj.gamma       = LivenessConfig.gamma;
-            obj.eps_band    = LivenessConfig.eps_band;
-            obj.live_margin = LivenessConfig.live_margin;
+            obj.gamma       = FilterConfig.gamma;
+            obj.eps_band    = FilterConfig.eps_band;
+            obj.live_margin = FilterConfig.live_margin;
 
             if nargin < 3 || isempty(tables_dir)
-                tables_dir = LivenessConfig.tables_dir_default;
+                tables_dir = FilterConfig.tables_dir_default;
             end
 
             obj.lut = ValueFunctionLUT(obj.spec, tables_dir, uh_bp, wh_bp);
@@ -283,16 +283,16 @@ classdef LivenessFilter < handle
             trim = U0(spec.U0_idx);
             trim = trim(:);
 
-            lift_lb = LivenessConfig.rpm2radps(LivenessConfig.Pi_lift_rpm(1));
-            lift_ub = LivenessConfig.rpm2radps(LivenessConfig.Pi_lift_rpm(2));
-            push_lb = LivenessConfig.rpm2radps(LivenessConfig.Pi_push_rpm(1));
-            push_ub = LivenessConfig.rpm2radps(LivenessConfig.Pi_push_rpm(2));
-            surf_lb = deg2rad(LivenessConfig.srf_deg(1));
-            surf_ub = deg2rad(LivenessConfig.srf_deg(2));
+            lift_lb = FilterConfig.rpm2radps(FilterConfig.Pi_lift_rpm(1));
+            lift_ub = FilterConfig.rpm2radps(FilterConfig.Pi_lift_rpm(2));
+            push_lb = FilterConfig.rpm2radps(FilterConfig.Pi_push_rpm(1));
+            push_ub = FilterConfig.rpm2radps(FilterConfig.Pi_push_rpm(2));
+            surf_lb = deg2rad(FilterConfig.srf_deg(1));
+            surf_ub = deg2rad(FilterConfig.srf_deg(2));
 
-            Dlift = LivenessConfig.rpm2radps(LivenessConfig.Delta_lift_RPM);
-            Dpush = LivenessConfig.rpm2radps(LivenessConfig.Delta_push_RPM);
-            Dsurf = deg2rad(LivenessConfig.Delta_surf_Deg);
+            Dlift = FilterConfig.rpm2radps(FilterConfig.Delta_lift_RPM);
+            Dpush = FilterConfig.rpm2radps(FilterConfig.Delta_push_RPM);
+            Dsurf = deg2rad(FilterConfig.Delta_surf_Deg);
 
             nu = spec.nu;
             lb = zeros(nu, 1);

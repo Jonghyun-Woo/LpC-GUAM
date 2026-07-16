@@ -6,26 +6,55 @@
 %   'althold' (default) : hold 80 ft through cruise
 %   'climb'             : keep climbing to 100 ft (original)
 %
-% Usage: run this script from anywhere; it adds Refactoring/ to the path,
-% runs the closed-loop simulation, and plots results vs. the reference.
+% Pipeline: build a central Config -> construct LpC_GUAM(cfg) -> run the
+% explicit closed-loop step loop here -> plot results vs. the reference.
+% Run this script from anywhere; it adds the repo to the path.
 
 here = fileparts(mfilename('fullpath'));
-addpath(genpath(pwd));
+addpath(genpath(here));
 
-scenario = 'althold';   % 'althold' (cruise altitude hold, default) | 'climb' (original)
-cfg.M          = 4000;  % sim steps -> T = M*dt = 40 s (0-20 s climb, 20-40 s cruise)
-cfg.target_vel = 15;    % cruise forward speed [ft/s] (unused by 'althold' reference build)
-guam = LpC_GUAM(scenario, cfg);
+%% Overriding simulation parameters (optional)
+scenario = 'althold';   % TODO: 'althold' or 'climb' or 'lon_brt_verify' (추가예정)
+params = struct();
+params.steps = 4000;
+params.target_vel = 15;
 
-% Transition demo runs the nominal RSLQR allocation only (no CBF liveness
-% intervention). The allocation frame code in RSLQR.pseudo_alloc still needs
-% a valid WH anchor even with the filter off, so set both here.
-guam.controller.liveness_lon.mode  = 'off';
-guam.controller.liveness_wh_anchor = guam.controller.WH(3);
+params.filter_mode = 'off';
+params.filter_wh_anchor = [];
 
-out  = guam.run();
+%% 1) Config assembly (single entry point)
+cfg = Config(scenario, params);
 
-%% Plots
+%% 2) Dynamics simulation object
+guam = LpC_GUAM(cfg);
+
+%% 3) Simulation loop
+rt = guam.refTraj;  N = size(rt.pos, 2);  dt = guam.simConfig.dt;
+out.time    = (0:N-1) .* dt;
+out.state   = zeros(12, N);
+out.engine  = zeros(9, N);
+out.surface = zeros(5, N);
+out.alpha   = zeros(1, N);
+out.beta    = zeros(1, N);
+out.V       = zeros(1, N);
+out.ref_pos = rt.pos;
+out.ref_vel = rt.vel;
+
+guam.reset();
+for k = 1:N
+    ref.pos = rt.pos(:, k);  ref.vel = rt.vel(:, k);
+    ref.chi = rt.chi(k);     ref.chi_dot = rt.chidot(k);
+
+    out.state(:, k) = guam.state;
+    [out.alpha(k), out.beta(k), out.V(k)] = ...
+        guam.aeroFrame.compute(guam.state(4), guam.state(5), guam.state(6));
+
+    [engine, surface] = guam.step(ref);
+    out.engine(:, k)  = engine;
+    out.surface(:, k) = surface;
+end
+
+%% 4) Plots
 t = out.time;
 
 figure('Name', 'Position (NED)');

@@ -53,12 +53,10 @@ classdef RSLQRConfig
         flp_max = deg2rad(30);
         flp_min = -deg2rad(30);
 
-        % Controller servo-compensator discretization step (used by RSLQR
-        % lon/lat integrators). Matches SimConfig.dt.
-        dt = 0.01;
-        % Reference trajectory tables (ref_pos/ref_vel/...) moved to
-        % ReferenceTrajectory / SimConfig. This class holds gains/limits +
-        % the controller time step only.
+        % NOTE: the servo-compensator discretization step (dt) is NOT stored
+        % here. It is owned by SimConfig and injected into RSLQR at
+        % construction (RSLQR(rslqrCfg, filterCfg, dt)) so sim and controller
+        % share a single dt. This class holds gains/limits only.
     end
 
 end

@@ -1,34 +1,21 @@
-classdef LivenessConfig
+classdef FilterConfig < handle
     % Configuration constants and per-channel spec for the longitudinal
     % (and, for verification only, lateral) HJ-reachability liveness filter.
     %
-    % Mirrors the helperOC BRT-generation constants (Config.m, GUAM_Config.m)
-    % so that the runtime filter's control-authority box matches the box the
-    % value functions were computed under.
-    %
-    % UNITS: grids, states and inputs are ft/s, rad/s, rad. The m/deg scaling
-    % found in helperOC visualize_*_tube.m is VISUALIZATION-ONLY and must NOT
-    % be applied to the value-function grid.
-    %
-    % Reference: docs/refs/liveness-filter.md, helperOC Config.m / GUAM_Config.m.
+    % handle class: runtime knobs (mode/wh_anchor) set on the hub
+    % (cfg.controller.filter) are shared by reference with the consumers.
+
+    properties
+        % --- Runtime knobs (set on the hub before LpC_GUAM construction) ---
+        mode      = 'blend';   % 'blend' | 'lr' | 'off'  (liveness filter mode)
+        wh_anchor = [];        % []=RSLQR defaults to WH(3)
+    end
 
     properties (Constant)
         % --- Filter parameters (channel-independent) ---
         gamma    = 5.0;     % smooth-blending CBF rate (paper recommends high gamma; tune post-integ)
         eps_band = 1e-3;    % LR boundary band: treat V >= -eps_band as boundary/outside (default-live)
-        % dV/dt evaluation for the blend trigger/QP:
-        %   'linear'    : dV/dt = alpha + beta'*u  (alpha=gradV'*A*x, beta=(gradV'*B)')
-        %   'nonlinear' : dV/dt = gradV' * f_plant(x_full, u)  via an injected
-        %                 plant-rate closure (see RSLQR.set_liveness_dynamics).
-        % The linear model sign-flips at large perturbation (w>~12 ft/s), blinding
-        % the trigger; 'nonlinear' evaluates the true rate. Falls back to 'linear'
-        % if no closure / full state is available.
-        rate_mode = 'linear';
-        % Conservative live-set margin c >= 0: tighten the enforced live set to
-        % {V <= -c} so the filter engages before the true boundary (V=0),
-        % holding V <= -c. Constraint becomes dV/dt <= -gamma*(V+c); LR boundary
-        % becomes V >= -(c+eps_band). c=0 reproduces the untightened filter.
-        live_margin = 0.0;
+        live_margin = 0.0;  % Conservative live-set margin c >= 0
 
         % --- Perturbation caps from trim (must match BRT generation) ---
         Delta_lift_RPM = 300;   % max lift-rotor speed change from trim (RPM)
@@ -42,6 +29,14 @@ classdef LivenessConfig
 
         % Default directory scanned for BRT value-function .mat files.
         tables_dir_default = 'tables/BRT';
+    end
+
+    methods
+        function obj = FilterConfig(overrides)
+            if nargin < 1 || isempty(overrides), overrides = struct(); end
+            obj.mode      = getfield_default(overrides, 'filter_mode', obj.mode);
+            obj.wh_anchor = getfield_default(overrides, 'filter_wh_anchor', obj.wh_anchor);
+        end
     end
 
     methods (Static)
@@ -78,8 +73,8 @@ classdef LivenessConfig
                     spec.U0_idx     = [5:12, 2, 4];          % lift1..8, aileron, rudder
                     spec.effector_type = [repmat("lift", 1, 8), "surf", "surf"];
                 otherwise
-                    error('LivenessConfig:channelSpec', ...
-                          'Unknown channel "%s" (expected ''lon'' or ''lat'').', channel);
+                    error('FilterConfig:channelSpec', ...
+                        'Unknown channel "%s" (expected ''lon'' or ''lat'').', channel);
             end
             spec.channel  = lower(channel);
             spec.grid_min = -spec.grid_max;
