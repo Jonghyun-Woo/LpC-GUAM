@@ -5,11 +5,11 @@
 %   under off-trim initial perturbations.
 close all; clear all;
 
-addpath(genpath('C:\Users\grape\OneDrive\CAU\AISL\LpC-GUAM\Refactoring'));
 cd('C:\Users\grape\OneDrive\CAU\AISL\LpC-GUAM');
+addpath(genpath(pwd));
 
 % Trim Table setting
-S = load('tables/trim/trim_table_Poly_ConcatVer4p0.mat');
+S = load('trim_table_Poly_ConcatVer4p0.mat');   % resolved via MATLAB path (vehicles/Lift+Cruise/)
 % Environment Parameters
 cfg.M        = 10000;        % Total simulation steps
 cfg.whAnchor = S.WH(3);     % WH for calling trim table in perspective of BRT
@@ -68,8 +68,12 @@ end
 
 % -------------------------------------------------------------------------
 function R = run_case(idx, val, onoff, cfg)
-    g = LpC_GUAM('lon_brt_verify', cfg);
-    f = g.controller.liveness_lon;
+    % Build the config hub from the diagnostic struct's mission fields; the
+    % rest of `cfg` (gamma/margin/whAnchor/tol/divW/...) stays a plain struct
+    % used only inside diagnostics.
+    hub = Config('lon_brt_verify', struct('M', cfg.M, 'target_vel', cfg.target_vel));
+    g   = LpC_GUAM(hub);
+    f   = g.controller.liveness_lon;
 
     % Config defaults used only inside diagnostics.
     tol   = getfield_default(cfg, 'tol',   1e-6);

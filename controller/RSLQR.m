@@ -13,6 +13,7 @@ classdef RSLQR < handle
 
     properties
         cfg       % RSLQRConfig (weights and dimension constants)
+        dt        % servo-compensator discretization step [s] (injected from SimConfig)
         UH        % N_trim x 1  body-frame x-velocity (u) breakpoints [ft/s]
         WH        % M_trim x 1  body-frame z-velocity (w) breakpoints [ft/s]
                   % (verified: WH == XU0(3)=body w exactly; NOT heading/inertial.
@@ -33,13 +34,19 @@ classdef RSLQR < handle
 
     methods
 
-        function obj = RSLQR()
+        function obj = RSLQR(rslqrCfg, filterCfg, dt)
             % Load the precomputed gain-scheduled RSLQR design
             % (trim table + lon/lat gain tables over the UH x WH envelope).
             % trim_table_Poly_ConcatVer4p0.mat must be on the MATLAB path.
+            %
+            % Injected config (from the central hub):
+            %   rslqrCfg  : RSLQRConfig  (weights/limits)
+            %   filterCfg : FilterConfig (liveness mode/anchor)
+            %   dt        : sim timestep [s] (servo-compensator discretization)
 
-            obj.cfg = RSLQRConfig;
-            S = load('tables/trim/trim_table_Poly_ConcatVer4p0.mat');
+            obj.cfg = rslqrCfg;
+            obj.dt  = dt;
+            S = load('trim_table_Poly_ConcatVer4p0.mat');   % resolved via MATLAB path (vehicles/Lift+Cruise/)
             obj.XU0 = S.XU0_interp;
             obj.UH  = S.UH;
             obj.WH  = S.WH;
@@ -75,12 +82,15 @@ classdef RSLQR < handle
             obj.theta_v = 0;
 
             % Longitudinal liveness filter (production channel). Loads BRT
-            % value functions from LivenessConfig.tables_dir_default; passes
+            % value functions from FilterConfig.tables_dir_default; passes
             % through when tables are absent or (uh,wh) is outside coverage.
-            % Default mode 'blend' (smooth blending). Callers may override
-            % obj.liveness_lon.mode ('blend' | 'lr' | 'off').
-            obj.liveness_lon = LivenessFilter('lon', 'blend', ...
-                LivenessConfig.tables_dir_default, obj.UH, obj.WH);
+            % Mode/anchor come from the injected FilterConfig (hub-owned).
+            obj.liveness_lon = LivenessFilter('lon', filterCfg.mode, ...
+                FilterConfig.tables_dir_default, obj.UH, obj.WH);
+            obj.liveness_wh_anchor = filterCfg.wh_anchor;
+            if isempty(obj.liveness_wh_anchor)
+                obj.liveness_wh_anchor = obj.WH(3);   % default anchor
+            end
         end
 
         function [iU, kU, iW, kW] = lookup_breakpt(obj, uh_curr, wh_curr)
@@ -230,14 +240,14 @@ classdef RSLQR < handle
     
         function mdes_lon = lon_ctrl(obj, ctrl_lon, Xlon_cmd, Xlon)
             obj.ctrl_lon_i = obj.ctrl_lon_i +...
-             (ctrl_lon.F * Xlon_cmd - ctrl_lon.C * Xlon + ctrl_lon.Kv * (obj.theta_v - ctrl_lon.Cv * Xlon)) .* obj.cfg.dt;
+             (ctrl_lon.F * Xlon_cmd - ctrl_lon.C * Xlon + ctrl_lon.Kv * (obj.theta_v - ctrl_lon.Cv * Xlon)) .* obj.dt;
             
             mdes_lon = ctrl_lon.G * Xlon_cmd + ctrl_lon.Ki * obj.ctrl_lon_i - ctrl_lon.Kx * Xlon;
         end
         
         function mdes_lat = lat_ctrl(obj, ctrl_lat, Xlat_cmd, Xlat)
             obj.ctrl_lat_i = obj.ctrl_lat_i +...
-             (ctrl_lat.F * Xlat_cmd - ctrl_lat.C * Xlat + ctrl_lat.Kv * (obj.phi_v - ctrl_lat.Cv * Xlat)) .* obj.cfg.dt;
+             (ctrl_lat.F * Xlat_cmd - ctrl_lat.C * Xlat + ctrl_lat.Kv * (obj.phi_v - ctrl_lat.Cv * Xlat)) .* obj.dt;
             
             mdes_lat = ctrl_lat.G * Xlat_cmd + ctrl_lat.Ki * obj.ctrl_lat_i - ctrl_lat.Kx * Xlat;
         end

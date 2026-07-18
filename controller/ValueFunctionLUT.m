@@ -17,7 +17,7 @@ classdef ValueFunctionLUT < handle
     % Reference: docs/refs/liveness-filter.md, helperOC GUAM_HJIR.m / Config.m.
 
     properties
-        spec            % LivenessConfig.channelSpec(channel) struct
+        spec            % FilterConfig.channelSpec(channel) struct
         available       % true if at least one BRT table was loaded
         gv              % 1x4 cell of grid vectors [ft/s, ft/s, rad/s, rad]
         grid_min        % 4x1
@@ -39,7 +39,7 @@ classdef ValueFunctionLUT < handle
 
     methods
         function obj = ValueFunctionLUT(spec, tables_dir, uh_bp, wh_bp)
-            % spec       : LivenessConfig.channelSpec(ch)
+            % spec       : FilterConfig.channelSpec(ch)
             % tables_dir : directory scanned for spec.brt_prefix + '_UH%d_WH%d.mat'
             % uh_bp,wh_bp: UH/WH breakpoint vectors [ft/s] (trim table S.UH, S.WH)
             obj.spec     = spec;
