@@ -14,9 +14,10 @@ classdef LpC_GUAM < handle
     %   atmosphere -> polynomial aero-propulsive forces/moments ->
     %   6-DOF rigid body EOM -> forward-Euler state update.
     properties
+        config          % Config (central hub; sub-configs distributed below)
         vehicleConfig   % VehicleConfig (also passed to the aero model as Model)
         simConfig       % SimConfig (owns dt/T and the scenario)
-        refTraj         % Reference trajectory table (from SimConfig.getReferenceTrajectory)
+        refTraj         % Reference trajectory table (from ControllerConfig.getReferenceTrajectory)
         units           % Units ('ft','slug') — aero model unit conversions
 
         rigidBody       % RBD 6-DOF equations of motion
@@ -31,21 +32,24 @@ classdef LpC_GUAM < handle
     end
 
     methods
-        function obj = LpC_GUAM(scenario, cfg)
-            if nargin < 1 || isempty(scenario)
-                scenario = 'althold';
-            end
-            obj.vehicleConfig   = VehicleConfig();
-            obj.simConfig       = SimConfig(scenario, cfg);
-            obj.refTraj         = obj.simConfig.getReferenceTrajectory(cfg);
+        function obj = LpC_GUAM(cfg)
+            % cfg : Config hub (see config/Config.m). Sub-configs are
+            % distributed to the owning components below.
+            if nargin < 1 || isempty(cfg), cfg = Config('althold'); end
+
+            obj.config          = cfg;
+            obj.vehicleConfig   = cfg.vehicle;
+            obj.simConfig       = cfg.sim;
+            obj.refTraj         = cfg.controller.getReferenceTrajectory();
             obj.units           = Units('ft', 'slug');
 
-            obj.rigidBody       = RBD(obj.vehicleConfig);
+            obj.rigidBody       = RBD(cfg.vehicle);
             obj.aeroFrame       = AeroFrame();
             obj.environment     = Environment();
-            obj.controller      = RSLQR();
-            obj.engineDynamics  = EngineDynamics(obj.simConfig.dt);
-            obj.surfaceDynamics = SurfaceDynamics(obj.simConfig.dt);
+            obj.controller      = RSLQR(cfg.controller.rslqr, ...
+                                        cfg.controller.filter, cfg.sim.dt);
+            obj.engineDynamics  = EngineDynamics(cfg.sim.dt);
+            obj.surfaceDynamics = SurfaceDynamics(cfg.sim.dt);
 
             obj.reset();
         end
@@ -126,40 +130,6 @@ classdef LpC_GUAM < handle
                                     obj.units, obj.vehicleConfig);
             dx = obj.rigidBody.calculate_dynamics(x_full, Fb, Mb);
             Xlon_dot = dx([4; 6; 11; 8]);
-        end
-
-        function out = run(obj)
-            % Run the full hover-to-cruise transition defined by the
-            % reference trajectory table and return logged results.
-            rt  = obj.refTraj;
-            N   = size(rt.pos, 2);
-            dt  = obj.simConfig.dt;
-
-            out.time    = (0:N-1) .* dt;
-            out.state   = zeros(12, N);
-            out.engine  = zeros(9, N);
-            out.surface = zeros(5, N);
-            out.alpha   = zeros(1, N);
-            out.beta    = zeros(1, N);
-            out.V       = zeros(1, N);
-            out.ref_pos = rt.pos;
-            out.ref_vel = rt.vel;
-
-            obj.reset();
-            for k = 1:N
-                ref.pos     = rt.pos(:, k);
-                ref.vel     = rt.vel(:, k);
-                ref.chi     = rt.chi(k);
-                ref.chi_dot = rt.chidot(k);
-
-                out.state(:, k) = obj.state;
-                [out.alpha(k), out.beta(k), out.V(k)] = ...
-                    obj.aeroFrame.compute(obj.state(4), obj.state(5), obj.state(6));
-
-                [engine, surface] = obj.step(ref);
-                out.engine(:, k)  = engine;
-                out.surface(:, k) = surface;
-            end
         end
     end
 end
