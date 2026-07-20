@@ -16,13 +16,7 @@ plans/
 docs/refs
 
 # MAT files: keep local, commit only distilled .md notes
-# *.mat
-
-# .md
-*.md
-!WIKI.md
-!README.md
+*.mat
 
 # Test Scripts
 Refactoring/tests/*
-!Refactoring/tests/diag_e3_intervention.m

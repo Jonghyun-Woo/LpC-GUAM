@@ -55,7 +55,7 @@ classdef RSLQRConfig
 
         % NOTE: the servo-compensator discretization step (dt) is NOT stored
         % here. It is owned by SimConfig and injected into RSLQR at
-        % construction (RSLQR(rslqrCfg, filterCfg, dt)) so sim and controller
+        % construction (RSLQR(rslqrCfg, dt)) so sim and controller
         % share a single dt. This class holds gains/limits only.
     end
 

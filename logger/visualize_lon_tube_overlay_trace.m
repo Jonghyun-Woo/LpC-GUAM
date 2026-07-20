@@ -332,7 +332,7 @@ function P = get_lon_plot_config()
     P.lon_scale = [P.ft2m; P.ft2m; P.rad2deg; P.rad2deg];
     
     if exist('FilterConfig', 'class') == 8 || exist('FilterConfig', 'file') == 2
-        spec = FilterConfig.channelSpec('lon');
+        spec = FilterConfig.axisSpec('lon');
     
         if isfield_or_prop(spec, 'grid_min')
             grid_min = get_field_or_prop(spec, 'grid_min');

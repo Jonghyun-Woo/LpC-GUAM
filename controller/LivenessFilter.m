@@ -29,8 +29,8 @@ classdef LivenessFilter < handle
     end
 
     methods
-        function obj = LivenessFilter(channel, mode, tables_dir, uh_bp, wh_bp)
-            obj.spec        = FilterConfig.channelSpec(channel);
+        function obj = LivenessFilter(axis, mode, tables_dir, uh_bp, wh_bp)
+            obj.spec        = FilterConfig.axisSpec(axis);
             obj.mode        = lower(mode);
             obj.gamma       = FilterConfig.gamma;
             obj.eps_band    = FilterConfig.eps_band;

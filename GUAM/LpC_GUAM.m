@@ -1,110 +1,110 @@
 classdef LpC_GUAM < handle
-    % LPC_GUAM Top-level orchestrator for the LpC m-code refactor.
+    % LPC_GUAM Flat-earth (NED) 6-DOF plant for the GUAM Lift+Cruise model.
     %
-    % Flat-earth (NED) closed-loop simulation of the GUAM Lift+Cruise
-    % hover-to-cruise transition. No ECI/ECEF frames — position is NED,
-    % altitude = -rd. The reference trajectory is selected by scenario
-    % (see ReferenceTrajectory / SimConfig):
-    %   'althold' (default) - hover climb to 80 ft, then hold 80 ft in cruise
-    %   'climb'             - hover climb to 80 ft, then climb to 100 ft
+    % Pure plant. Given per-step actuator commands (rotor speeds + surface
+    % deflections), it advances its own state through first-order actuator
+    % servos, the polynomial aero-propulsive model, and RK4 integration of the
+    % rigid-body EOM. No ECI/ECEF frames — position is NED, altitude = -rd.
     %
-    % Per-step pipeline (mirrors GUAM.slx with the default variants:
-    % Polynomial aero, FirstOrder actuators, Simple EOM):
-    %   RSLQR control -> engine/surface servo dynamics -> standard
-    %   atmosphere -> polynomial aero-propulsive forces/moments ->
-    %   6-DOF rigid body EOM -> forward-Euler state update.
+    % The controller lives outside the plant: the simulation driver calls
+    % controller.control() to obtain the effector commands, then passes them to
+    % step(). step() returns nothing — its effect is the update of obj.state /
+    % obj.time (and the actual actuator positions obj.engine / obj.surface).
+    %
+    % Per-step pipeline (mirrors GUAM.slx default variants: Polynomial aero,
+    % FirstOrder actuators, Simple EOM):
+    %   engine/surface servo dynamics -> standard atmosphere ->
+    %   polynomial aero-propulsive forces/moments -> 6-DOF rigid body EOM ->
+    %   RK4 state update.
     properties
-        config          % Config (central hub; sub-configs distributed below)
         vehicleConfig   % VehicleConfig (also passed to the aero model as Model)
         simConfig       % SimConfig (owns dt/T and the scenario)
-        refTraj         % Reference trajectory table (from ControllerConfig.getReferenceTrajectory)
         units           % Units ('ft','slug') — aero model unit conversions
 
         rigidBody       % RBD 6-DOF equations of motion
         aeroFrame       % AeroFrame (alpha/beta/airspeed for logging)
         environment     % Environment (flat-earth atmosphere + steady wind)
-        controller      % RSLQR gain-scheduled controller
         engineDynamics  % EngineDynamics (9 rotor speed servos)
         surfaceDynamics % SurfaceDynamics (5 surface servos [LA RA LE RE RUD])
 
         state           % Current state [rn re rd u v w phi theta psi p q r]' (12x1)
         time            % Current simulation time [s]
+        engine          % Actual rotor speeds after servo dynamics (9x1) [rad/s]
+        surface         % Actual surface deflections after servo dynamics (5x1) [rad]
     end
 
     methods
         function obj = LpC_GUAM(cfg)
-            % cfg : Config hub (see config/Config.m). Sub-configs are
-            % distributed to the owning components below.
+            % cfg : Config hub (see config/Config.m). Only the vehicle/sim
+            % sub-configs are used here; the controller is built and owned by
+            % the simulation driver, not the plant.
             if nargin < 1 || isempty(cfg), cfg = Config('althold'); end
 
-            obj.config          = cfg;
             obj.vehicleConfig   = cfg.vehicle;
             obj.simConfig       = cfg.sim;
-            obj.refTraj         = cfg.controller.getReferenceTrajectory();
             obj.units           = Units('ft', 'slug');
 
             obj.rigidBody       = RBD(cfg.vehicle);
             obj.aeroFrame       = AeroFrame();
             obj.environment     = Environment();
-            obj.controller      = RSLQR(cfg.controller.rslqr, ...
-                                        cfg.controller.filter, cfg.sim.dt);
             obj.engineDynamics  = EngineDynamics(cfg.sim.dt);
             obj.surfaceDynamics = SurfaceDynamics(cfg.sim.dt);
 
-            obj.reset();
+            obj.state   = zeros(12, 1);
+            obj.time    = 0;
+            obj.engine  = obj.engineDynamics.pos;
+            obj.surface = obj.surfaceDynamics.pos;
         end
 
-        function reset(obj)
-            % Initialize the vehicle at the trim condition of the first
-            % reference-trajectory point (as GUAM's setupTrim does for the
-            % initial reference velocity).
-            uh0 = obj.refTraj.vel(1, 1);
-            wh0 = obj.refTraj.vel(3, 1);
-            [X0, U0] = obj.controller.interp_xu0(uh0, wh0);
-
-            obj.state         = zeros(12, 1);
-            obj.state(1:3)    = obj.refTraj.pos(:, 1);  % NED position
-            obj.state(4:6)    = X0(1:3);            % body velocity at trim
-            obj.state(7:9)    = X0(10:12);          % Euler angles at trim
-            obj.state(10:12)  = X0(4:6);            % body rates at trim
-
-            % Actuators start at trim settings
-            obj.engineDynamics.reset(U0(5:13));
-            obj.surfaceDynamics.reset([U0(1) - U0(2);...
-                                       U0(1) + U0(2);...
-                                       U0(3);...
-                                       U0(3);...
-                                       U0(4)]);
-            obj.controller.reset();
-            obj.time = 0;
+        function reset(obj, x0, engine0, surface0)
+            % Initialize the plant state and actuator servos. The trim initial
+            % condition (rigid state x0 + actuator trims engine0/surface0) is
+            % supplied by the driver from the controller (see
+            % Controller.initial_condition).
+            obj.state = x0(:);
+            obj.time  = 0;
+            obj.engineDynamics.reset(engine0);
+            obj.surfaceDynamics.reset(surface0);
+            obj.engine  = obj.engineDynamics.pos;
+            obj.surface = obj.surfaceDynamics.pos;
         end
 
-        function [engine, surface, Fb, Mb] = step(obj, ref)
-            % Advance the closed-loop simulation one time step.
-            % ref : struct with fields pos (3x1 NED), vel (3x1 heading
-            %       frame), chi, chi_dot
+        function step(obj, engine_cmd, surface_cmd)
+            % Advance the plant one time step under the given actuator commands.
+            % Updates obj.state / obj.time and the actual actuator positions
+            % obj.engine / obj.surface. Returns nothing.
+            %
+            % engine_cmd  : 9x1 commanded rotor speeds [rad/s]
+            % surface_cmd : 5x1 commanded surface deflections [rad]
+            dt = obj.simConfig.dt;
 
-            % 1. Control law -> effector commands
-            [eng_cmd, srf_cmd] = obj.controller.control(obj.state, ref);
+            % 1. Actuator servo dynamics (advanced once; held over the RK4 stages)
+            engine  = obj.engineDynamics.step(engine_cmd);
+            surface = obj.surfaceDynamics.step(surface_cmd);
+            obj.engine  = engine;
+            obj.surface = surface;
 
-            % 2. Actuator dynamics
-            engine  = obj.engineDynamics.step(eng_cmd);
-            surface = obj.surfaceDynamics.step(srf_cmd);
+            % 2. RK4 integration of the 6-DOF rigid-body state
+            x  = obj.state;
+            k1 = obj.state_derivative(x,             engine, surface);
+            k2 = obj.state_derivative(x + 0.5*dt*k1, engine, surface);
+            k3 = obj.state_derivative(x + 0.5*dt*k2, engine, surface);
+            k4 = obj.state_derivative(x +     dt*k3, engine, surface);
+            obj.state = x + (dt / 6) .* (k1 + 2*k2 + 2*k3 + k4);
+            obj.time  = obj.time + dt;
+        end
 
-            % 3. Atmosphere at current altitude (flat earth: h = -rd)
-            [rho, a] = obj.environment.atmosphere(-obj.state(3));
-
-            % 4. Aero-propulsive forces/moments (air-relative body velocity)
-            R_i2b = RSLQR.rotm_i2b(obj.state(7), obj.state(8), obj.state(9));
-            v_air = obj.environment.airspeed_body(obj.state(4:6), R_i2b);
-            x_aero = [v_air; obj.state(10:12)];
+        function dx = state_derivative(obj, x, engine, surface)
+            % 6-DOF rigid-body rate at state x for fixed actuator positions.
+            % Atmosphere -> air-relative aero-propulsive forces/moments -> EOM
+            % (gravity included inside RBD). Used as the RK4 stage function.
+            [rho, a] = obj.environment.atmosphere(-x(3));
+            R_i2b  = RSLQR.rotm_i2b(x(7), x(8), x(9));
+            v_air  = obj.environment.airspeed_body(x(4:6), R_i2b);
+            x_aero = [v_air; x(10:12)];
             [Fb, Mb] = run_LpC_aero(x_aero, engine, surface, rho, a, ...
                                     obj.units, obj.vehicleConfig);
-
-            % 5. 6-DOF EOM (gravity added inside RBD) + forward Euler
-            dx = obj.rigidBody.calculate_dynamics(obj.state, Fb, Mb);
-            obj.state = obj.state + obj.simConfig.dt .* dx;
-            obj.time  = obj.time + obj.simConfig.dt;
+            dx = obj.rigidBody.calculate_dynamics(x, Fb, Mb);
         end
 
         function Xlon_dot = lon_plant_rate(obj, x_full, U0, u_perturb)

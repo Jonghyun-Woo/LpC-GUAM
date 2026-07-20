@@ -82,26 +82,33 @@ end
 
 % -------------------------------------------------------------------------
 function [L, cfg] = run_once(scenario, params)
-% One closed-loop transition run. The step loop stays inline here
-% SimLogger only buffers/plots. Returns the finalized logger
-% and the config hub used.
-cfg  = Config(scenario, params);
-guam = LpC_GUAM(cfg);
-L    = SimLogger(cfg.logger, cfg.sim);
+% One closed-loop transition run. The controller and plant are separate: the
+% controller produces the effector commands and the plant (LpC_GUAM) integrates
+% under them. The step loop stays inline here; SimLogger only buffers/plots.
+% Returns the finalized logger and the config hub used.
+cfg        = Config(scenario, params);
+controller = Controller(cfg.controller, cfg.sim.dt);
+guam       = LpC_GUAM(cfg);
+L          = SimLogger(cfg.logger, cfg.sim);
 
-rt = guam.refTraj;  N = size(rt.pos, 2);
-guam.reset();
+rt = cfg.controller.getReferenceTrajectory();  N = size(rt.pos, 2);
+
+% Initialize the plant at the trim of the first reference point.
+[x0, engine0, surface0] = controller.initial_condition(rt);
+guam.reset(x0, engine0, surface0);
+controller.reset();
+
 for k = 1:N
-    % Update Reference (TODO: Move this into LpC_GUAM.step() to avoid exposing the refTraj and improve this logic)
     ref.pos = rt.pos(:, k);  ref.vel = rt.vel(:, k);
     ref.chi = rt.chi(k);     ref.chi_dot = rt.chidot(k);
 
-    % Record the per-step state
+    % Record the per-step (pre-step) state
     L.addState(guam, k, ref);
-    % Physics step
-    [engine, surface] = guam.step(ref);
-    % Record the post-step control outputs including the safety filter states.
-    L.addInputs(guam, engine, surface);
+    % Controller produces effector commands; plant integrates under them.
+    [engine_cmd, surface_cmd] = controller.control(guam.state, ref);
+    guam.step(engine_cmd, surface_cmd);
+    % Record the post-step effectors and safety-filter diagnostics.
+    L.addInputs(controller, guam.engine, guam.surface);
 end
 L.finalize();
 end

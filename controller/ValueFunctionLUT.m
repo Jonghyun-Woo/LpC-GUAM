@@ -1,5 +1,5 @@
 classdef ValueFunctionLUT < handle
-    % Loads <prefix>_UH{i}_WH{j}.mat BRT value functions (prefix per channel)
+    % Loads <prefix>_UH{i}_WH{j}.mat BRT value functions (prefix per axis)
     % and provides scheduled, interpolated value V and gradient gradV at a
     % query perturbation state.
     %
@@ -17,46 +17,47 @@ classdef ValueFunctionLUT < handle
     % Reference: docs/refs/liveness-filter.md, helperOC GUAM_HJIR.m / Config.m.
 
     properties
-        spec            % FilterConfig.channelSpec(channel) struct
+        spec            % FilterConfig.axisSpec(axis) struct
         available       % true if at least one BRT table was loaded
-        gv              % 1x4 cell of grid vectors [ft/s, ft/s, rad/s, rad]
+        grid_vectors    % 1x4 cell of grid vectors [ft/s, ft/s, rad/s, rad]
         grid_min        % 4x1
         grid_max        % 4x1
 
-        uh_bp           % full UH breakpoint vector [ft/s] (trim table S.UH)
-        wh_bp           % full WH breakpoint vector [ft/s] (trim table S.WH)
+        uh_breakpoint   % full UH breakpoint vector [ft/s] (trim table S.UH)
+        wh_breakpoint   % full WH breakpoint vector [ft/s] (trim table S.WH)
 
-        availUH_idx     % sorted available UH indices (into uh_bp)
-        availWH_idx     % sorted available WH indices (into wh_bp)
-        availUH_vel     % uh_bp(availUH_idx)  (sorted velocities)
-        availWH_vel     % wh_bp(availWH_idx)
+        availUH_idx     % sorted available UH indices (into uh_breakpoint)
+        availWH_idx     % sorted available WH indices (into wh_breakpoint)
+        availUH_vel     % uh_breakpoint(availUH_idx)  (sorted velocities)
+        availWH_vel     % wh_breakpoint(availWH_idx)
         bandUH          % coverage half-band on UH axis [ft/s]
         bandWH          % coverage half-band on WH axis [ft/s]
 
-        tables          % struct array: .uh_idx .wh_idx .Vinterp .Ginterp(1x4)
-        tblLookup       % numel(availUH_idx) x numel(availWH_idx) -> index into tables (NaN if missing)
+        brt_tables      % struct array: .uh_idx .wh_idx .Vinterp .GradVinterp(1x4)
+        table_lookup    % numel(availUH_idx) x numel(availWH_idx) -> index into tables (NaN if missing)
     end
 
     methods
-        function obj = ValueFunctionLUT(spec, tables_dir, uh_bp, wh_bp)
-            % spec       : FilterConfig.channelSpec(ch)
-            % tables_dir : directory scanned for spec.brt_prefix + '_UH%d_WH%d.mat'
-            % uh_bp,wh_bp: UH/WH breakpoint vectors [ft/s] (trim table S.UH, S.WH)
-            obj.spec     = spec;
-            obj.grid_min = spec.grid_min(:);
-            obj.grid_max = spec.grid_max(:);
-            obj.uh_bp    = uh_bp(:);
-            obj.wh_bp    = wh_bp(:);
+        function obj = ValueFunctionLUT(spec, tables_dir, uh_breakpoint, wh_breakpoint)
+            % spec          : FilterConfig.axisSpec(ax)
+            % tables_dir    : directory scanned for spec.brt_prefix + '_UH%d_WH%d.mat'
+            % uh_breakpoint,
+            % wh_breakpoint : UH/WH breakpoint vectors [ft/s] (trim table S.UH, S.WH)
+            obj.spec            = spec;
+            obj.grid_min        = spec.grid_min(:);
+            obj.grid_max        = spec.grid_max(:);
+            obj.uh_breakpoint   = uh_breakpoint(:);
+            obj.wh_breakpoint   = wh_breakpoint(:);
 
             % Grid vectors and per-axis spacing (uniform).
-            obj.gv = cell(1, 4);
-            hstep  = zeros(4, 1);
+            obj.grid_vectors    = cell(1, 4);
+            grid_step           = zeros(4, 1);
             for d = 1:4
-                obj.gv{d} = linspace(spec.grid_min(d), spec.grid_max(d), spec.grid_num(d));
-                hstep(d)  = (spec.grid_max(d) - spec.grid_min(d)) / (spec.grid_num(d) - 1);
+                obj.grid_vectors{d} = linspace(spec.grid_min(d), spec.grid_max(d), spec.grid_num(d));
+                grid_step(d)        = (spec.grid_max(d) - spec.grid_min(d)) / (spec.grid_num(d) - 1);
             end
 
-            % Scan directory for value-function files of this channel.
+            % Scan directory for value-function files of this axis.
             % Resolve tables_dir against cwd first, then the MATLAB path (so a
             % relative 'tables/BRT' works when Refactoring/ is on the path but
             % is not the current folder, matching how RSLQR loads tables).
@@ -69,7 +70,7 @@ classdef ValueFunctionLUT < handle
             end
 
             rex = sprintf('^%s_UH(\\d+)_WH(\\d+)\\.mat$', spec.brt_prefix);
-            tbl = struct('uh_idx', {}, 'wh_idx', {}, 'Vinterp', {}, 'Ginterp', {});
+            tbl = struct('uh_idx', {}, 'wh_idx', {}, 'Vinterp', {}, 'GradVinterp', {});
             for f = 1:numel(files)
                 tok = regexp(files(f).name, rex, 'tokens', 'once');
                 if isempty(tok)
@@ -78,50 +79,51 @@ classdef ValueFunctionLUT < handle
                 ui = str2double(tok{1});
                 wi = str2double(tok{2});
 
-                S = load(fullfile(resolved, files(f).name));
-                assert(isfield(S, 'data'), 'ValueFunctionLUT:noData', ...
+                brt_value_table = load(fullfile(resolved, files(f).name));
+                assert(isfield(brt_value_table, 'data'), 'ValueFunctionLUT:noData', ...
                        '%s has no ''data'' field.', files(f).name);
-                data = S.data;
+
+                data = brt_value_table.data;
                 assert(isequal(size(data), spec.grid_num(:)'), ...
                        'ValueFunctionLUT:badSize', ...
                        '%s size %s ~= grid_num %s.', files(f).name, ...
                        mat2str(size(data)), mat2str(spec.grid_num(:)'));
 
-                Ginterp = cell(1, 4);
+                GradVinterp = cell(1, 4);
                 for d = 1:4
-                    G = ValueFunctionLUT.grad_along(data, d, hstep(d));
-                    Ginterp{d} = griddedInterpolant(obj.gv, G, 'linear', 'nearest');
+                    G = ValueFunctionLUT.grad_along(data, d, grid_step(d));
+                    GradVinterp{d} = griddedInterpolant(obj.grid_vectors, G, 'linear', 'nearest');
                 end
                 k = numel(tbl) + 1;
                 tbl(k).uh_idx  = ui;
                 tbl(k).wh_idx  = wi;
-                tbl(k).Vinterp = griddedInterpolant(obj.gv, data, 'linear', 'nearest');
-                tbl(k).Ginterp = Ginterp;
+                tbl(k).Vinterp = griddedInterpolant(obj.grid_vectors, data, 'linear', 'nearest');
+                tbl(k).GradVinterp = GradVinterp;
             end
 
             if isempty(tbl)
                 obj.available = false;
                 return;
             end
-            obj.tables    = tbl;
-            obj.available = true;
+            obj.brt_tables  = tbl;
+            obj.available   = true;
 
             % Available breakpoints and coverage bands.
             obj.availUH_idx = unique([tbl.uh_idx]);
             obj.availWH_idx = unique([tbl.wh_idx]);
-            obj.availUH_vel = obj.uh_bp(obj.availUH_idx)';
-            obj.availWH_vel = obj.wh_bp(obj.availWH_idx)';
-            obj.bandUH      = ValueFunctionLUT.axis_band(obj.availUH_vel, obj.uh_bp);
-            obj.bandWH      = ValueFunctionLUT.axis_band(obj.availWH_vel, obj.wh_bp);
+            obj.availUH_vel = obj.uh_breakpoint(obj.availUH_idx)';
+            obj.availWH_vel = obj.wh_breakpoint(obj.availWH_idx)';
+            obj.bandUH      = ValueFunctionLUT.axis_band(obj.availUH_vel, obj.uh_breakpoint);
+            obj.bandWH      = ValueFunctionLUT.axis_band(obj.availWH_vel, obj.wh_breakpoint);
 
             % (availUH x availWH) -> table index lookup (NaN where absent).
             nU = numel(obj.availUH_idx);
             nW = numel(obj.availWH_idx);
-            obj.tblLookup = nan(nU, nW);
+            obj.table_lookup = nan(nU, nW);
             for k = 1:numel(tbl)
                 iu = find(obj.availUH_idx == tbl(k).uh_idx, 1);
                 iw = find(obj.availWH_idx == tbl(k).wh_idx, 1);
-                obj.tblLookup(iu, iw) = k;
+                obj.table_lookup(iu, iw) = k;
             end
         end
 
@@ -142,42 +144,48 @@ classdef ValueFunctionLUT < handle
             end
 
             % The four corner tables must all be present.
-            kLL = obj.tblLookup(uLo, wLo);
-            kHL = obj.tblLookup(uHi, wLo);
-            kLH = obj.tblLookup(uLo, wHi);
-            kHH = obj.tblLookup(uHi, wHi);
-            if any(isnan([kLL, kHL, kLH, kHH]))
+            table_idx_LL = obj.table_lookup(uLo, wLo);
+            table_idx_HL = obj.table_lookup(uHi, wLo);
+            table_idx_LH = obj.table_lookup(uLo, wHi);
+            table_idx_HH = obj.table_lookup(uHi, wHi);
+            if any(isnan([table_idx_LL, table_idx_HL, table_idx_LH, table_idx_HH]))
                 return;
             end
 
             % Clamp state to grid bounds (nearest-face extrapolation is handled
             % by the interpolants, but clamp keeps queries well-defined).
             xc = min(max(x(:), obj.grid_min), obj.grid_max);
+            
+            interp_weight_LLp = (1 - tU) * (1 - tW);
+            interp_weight_HLp =      tU  * (1 - tW);
+            interp_weight_LHp = (1 - tU) *      tW;
+            interp_weight_HHp =      tU  *      tW;
 
-            wLLp = (1 - tU) * (1 - tW);
-            wHLp =      tU  * (1 - tW);
-            wLHp = (1 - tU) *      tW;
-            wHHp =      tU  *      tW;
+            [value_ll, gradV_ll] = obj.eval_table(table_idx_LL, xc);
+            [value_hl, gradV_hl] = obj.eval_table(table_idx_HL, xc);
+            [value_lh, gradV_lh] = obj.eval_table(table_idx_LH, xc);
+            [value_hh, gradV_hh] = obj.eval_table(table_idx_HH, xc);
 
-            [Vll, Gll] = obj.eval_table(kLL, xc);
-            [Vhl, Ghl] = obj.eval_table(kHL, xc);
-            [Vlh, Glh] = obj.eval_table(kLH, xc);
-            [Vhh, Ghh] = obj.eval_table(kHH, xc);
-
-            V     = wLLp*Vll + wHLp*Vhl + wLHp*Vlh + wHHp*Vhh;
-            gradV = wLLp*Gll + wHLp*Ghl + wLHp*Glh + wHHp*Ghh;
-            ok    = true;
+            V     = interp_weight_LLp * value_ll...
+                  + interp_weight_HLp * value_hl...
+                  + interp_weight_LHp * value_lh...
+                  + interp_weight_HHp * value_hh;
+            gradV = interp_weight_LLp * gradV_ll...
+                  + interp_weight_HLp * gradV_hl...
+                  + interp_weight_LHp * gradV_lh...
+                  + interp_weight_HHp * gradV_hh;
+            ok = true;
         end
     end
 
     methods (Access = private)
-        function [V, G] = eval_table(obj, k, xc)
-            % Evaluate value and gradient interpolants of table k at clamped xc.
-            t = obj.tables(k);
-            V = t.Vinterp(xc(1), xc(2), xc(3), xc(4));
-            G = zeros(4, 1);
+        function [V, G] = eval_table(obj, table_idx, xc)
+            % Evaluate value and gradient interpolants of table table_idx at clamped xc.
+            brt_table   = obj.brt_tables(table_idx);
+            V           = brt_table.Vinterp(xc(1), xc(2), xc(3), xc(4));
+            G           = zeros(4, 1);
             for d = 1:4
-                G(d) = t.Ginterp{d}(xc(1), xc(2), xc(3), xc(4));
+                G(d)    = brt_table.GradVinterp{d}(xc(1), xc(2), xc(3), xc(4));
             end
         end
     end

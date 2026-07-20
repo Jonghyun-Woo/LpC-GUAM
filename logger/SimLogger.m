@@ -3,8 +3,8 @@ classdef SimLogger < handle
     % trace. Read-only w.r.t. the simulation: it never advances the plant.
     %
     % Two-call logging contract (per step k, paired, in this order):
-    %   addState(k, guam, ref)         % BEFORE guam.step(): pre-step state/aero/ref
-    %   addInputs(guam, engine, surface)% AFTER  guam.step(): effectors + filter last_info
+    %   addState(guam, k, ref)              % BEFORE guam.step(): pre-step state/aero/ref
+    %   addInputs(controller, engine, surface)% AFTER guam.step(): effectors + filter last_info
     % The filter diagnostics (last_info) are populated during step(), so they
     % can only be read afterwards; the trajectory coordinates use the pre-step
     % state (matching the diagnostic trace convention: statePre + pre-step BRT).
@@ -91,9 +91,11 @@ classdef SimLogger < handle
             obj.buf.ref_vel(j, :) = ref.vel(:)';
         end
 
-        function addInputs(obj, guam, engine, surface)
+        function addInputs(obj, controller, engine, surface)
             % Record post-step effectors and filter diagnostics into the record
             % opened by the matching addState(); must be called AFTER guam.step().
+            % engine/surface are the actual actuator positions (guam.engine /
+            % guam.surface); the filter diagnostics come from the controller.
             if ~obj.cfg.enable, return; end
             j = obj.count;
             if j < 1, return; end
@@ -102,7 +104,7 @@ classdef SimLogger < handle
             obj.buf.surface(j, :) = surface(:)';
 
             if ~obj.cfg.logFilter, return; end
-            li = guam.controller.liveness_lon.last_info;
+            li = controller.safety_filter.last_info;
             if isempty(li), return; end
 
             nu_ = obj.nu;

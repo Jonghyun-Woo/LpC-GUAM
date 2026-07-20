@@ -1,5 +1,5 @@
 classdef FilterConfig < handle
-    % Configuration constants and per-channel spec for the longitudinal
+    % Configuration constants and per-axis spec for the longitudinal
     % (and, for verification only, lateral) HJ-reachability liveness filter.
     %
     % handle class: runtime knobs (mode/wh_anchor) set on the hub
@@ -12,7 +12,7 @@ classdef FilterConfig < handle
     end
 
     properties (Constant)
-        % --- Filter parameters (channel-independent) ---
+        % --- Filter parameters (axis-independent) ---
         gamma    = 5.0;     % smooth-blending CBF rate (paper recommends high gamma; tune post-integ)
         eps_band = 1e-3;    % LR boundary band: treat V >= -eps_band as boundary/outside (default-live)
         live_margin = 0.0;  % Conservative live-set margin c >= 0
@@ -28,7 +28,7 @@ classdef FilterConfig < handle
         srf_deg     = [-30, 30];    % control-surface deflection physical bounds (deg)
 
         % Default directory scanned for BRT value-function .mat files.
-        tables_dir_default = 'tables/BRT';
+        tables_dir_default = 'tables';
     end
 
     methods
@@ -40,11 +40,11 @@ classdef FilterConfig < handle
     end
 
     methods (Static)
-        function spec = channelSpec(channel)
-            % Return the per-channel spec struct used by ValueFunctionLUT and
+        function spec = axisSpec(axis)
+            % Return the per-axis spec struct used by ValueFunctionLUT and
             % LivenessFilter. All grid data in ft/s, rad/s, rad.
             %
-            %   channel : 'lon' (production) | 'lat' (verification-only)
+            %   axis : 'lon' (production) | 'lat' (verification-only)
             %
             % Fields:
             %   grid_min, grid_max : 4x1 grid corner (grid_min = -grid_max)
@@ -54,7 +54,7 @@ classdef FilterConfig < handle
             %   nu                 : number of physical effectors (filter dim)
             %   U0_idx             : indices into RSLQR U0 (13x1) picking the
             %                        per-effector trim inputs in filter order
-            switch lower(channel)
+            switch lower(axis)
                 case 'lon'
                     spec.grid_max   = [16; 33; 1.5; 0.75];
                     spec.grid_num   = [21; 41; 61; 31];
@@ -73,10 +73,10 @@ classdef FilterConfig < handle
                     spec.U0_idx     = [5:12, 2, 4];          % lift1..8, aileron, rudder
                     spec.effector_type = [repmat("lift", 1, 8), "surf", "surf"];
                 otherwise
-                    error('FilterConfig:channelSpec', ...
-                        'Unknown channel "%s" (expected ''lon'' or ''lat'').', channel);
+                    error('FilterConfig:axisSpec', ...
+                        'Unknown axis "%s" (expected ''lon'' or ''lat'').', axis);
             end
-            spec.channel  = lower(channel);
+            spec.axis  = lower(axis);
             spec.grid_min = -spec.grid_max;
         end
 

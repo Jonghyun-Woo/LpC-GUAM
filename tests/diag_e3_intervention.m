@@ -5,7 +5,7 @@
 %   under off-trim initial perturbations.
 close all; clear all;
 
-cd('C:\Users\grape\OneDrive\CAU\AISL\LpC-GUAM');
+% cd('C:\Users\grape\OneDrive\CAU\AISL\LpC-GUAM');
 addpath(genpath(pwd));
 
 % Trim Table setting
@@ -71,16 +71,17 @@ function R = run_case(idx, val, onoff, cfg)
     % Build the config hub from the diagnostic struct's mission fields; the
     % rest of `cfg` (gamma/margin/whAnchor/tol/divW/...) stays a plain struct
     % used only inside diagnostics.
-    hub = Config('lon_brt_verify', struct('M', cfg.M, 'target_vel', cfg.target_vel));
+    hub = Config('lon_brt_verify', struct('steps', cfg.M, 'target_vel', cfg.target_vel));
+    c   = Controller(hub.controller, hub.sim.dt);
     g   = LpC_GUAM(hub);
-    f   = g.controller.liveness_lon;
+    f   = c.safety_filter;
 
     % Config defaults used only inside diagnostics.
     tol   = getfield_default(cfg, 'tol',   1e-6);
     divW  = getfield_default(cfg, 'divW',  200);
 
     % Set anchor for both OFF and ON so diagnostics and controller share config.
-    g.controller.liveness_wh_anchor = cfg.whAnchor;
+    c.safety_filter_wh_anchor = cfg.whAnchor;
 
     if onoff
         f.mode        = 'blend';
@@ -90,22 +91,24 @@ function R = run_case(idx, val, onoff, cfg)
         f.mode = 'off';
     end
 
-    g.reset();
+    rt = hub.controller.getReferenceTrajectory();
+    [x0, engine0, surface0] = c.initial_condition(rt);
+    g.reset(x0, engine0, surface0);
+    c.reset();
     f.reset_counters();
 
     % Apply off-trim initial perturbation.
     g.state(idx) = g.state(idx) + val;
 
-    rt = g.refTraj;
     dt = g.simConfig.dt;
 
-    nu = g.controller.liveness_lon.spec.nu;
+    nu = c.safety_filter.spec.nu;
 
     trace = init_full_trace(cfg.M, nu);
     trace = add_transition_trace_fields(trace, cfg.M);
 
     % Initial transition-envelope query.
-    [envInit, ~, ~] = query_transition_frame(g, cfg);
+    [envInit, ~, ~] = query_transition_frame(g, c, cfg);
     if envInit.ok
         V0 = envInit.V;
     else
@@ -154,7 +157,7 @@ function R = run_case(idx, val, onoff, cfg)
         % selPre:
         %   selected frame that should match the filter-side BRT target.
         % -----------------------------------------------------------------
-        [envPre, selPre, candPre] = query_transition_frame(g, cfg);
+        [envPre, selPre, candPre] = query_transition_frame(g, c, cfg);
 
         nQuery = nQuery + 1;
 
@@ -199,7 +202,8 @@ function R = run_case(idx, val, onoff, cfg)
         % Advance one full GUAM closed-loop step.
         % The liveness filter is called inside controller.control().
         % -----------------------------------------------------------------
-        g.step(ref);
+        [eng_cmd, srf_cmd] = c.control(g.state, ref);
+        g.step(eng_cmd, srf_cmd);
 
         statePost = g.state(:);
         li = f.last_info;
@@ -255,7 +259,7 @@ function R = run_case(idx, val, onoff, cfg)
                 isfield(li, 'ok') && li.ok && ...
                 isfield(li, 'rhs') && isfinite(li.rhs)
 
-            [VnextFixed, okNextFixed, insideNextFixed] = query_fixed_candidate(g, selPre);
+            [VnextFixed, okNextFixed, insideNextFixed] = query_fixed_candidate(g, c, selPre);
 
             if okNextFixed && insideNextFixed
                 dVfd = (VnextFixed - selPre.V) / dt;
@@ -367,7 +371,7 @@ function R = run_case(idx, val, onoff, cfg)
             div = true;
 
             if all(isfinite(g.state))
-                [envPost, ~, ~] = query_transition_frame(g, cfg);
+                [envPost, ~, ~] = query_transition_frame(g, c, cfg);
 
                 if ~envPost.ok && gridExitK == 0
                     gridExitK = k + 1;
@@ -421,9 +425,9 @@ function R = run_case(idx, val, onoff, cfg)
 end
 
 % -------------------------------------------------------------------------
-function [env, selected, cand] = query_transition_frame(g, cfg)
-    cand.current = make_brt_candidate(g, cfg, 'current');
-    cand.next    = make_brt_candidate(g, cfg, 'next');
+function [env, selected, cand] = query_transition_frame(g, c, cfg)
+    cand.current = make_brt_candidate(g, c, cfg, 'current');
+    cand.next    = make_brt_candidate(g, c, cfg, 'next');
 
     c = cand.current;
     n = cand.next;
@@ -471,18 +475,19 @@ function [env, selected, cand] = query_transition_frame(g, cfg)
 end
 
 % -------------------------------------------------------------------------
-function brt = make_brt_candidate(g, cfg, which)
-    ctrl = g.controller;
-    spec = ctrl.liveness_lon.spec;
+function brt = make_brt_candidate(g, c, cfg, which)
+    bc   = c.baseline_controller;
+    sf   = c.safety_filter;
+    spec = sf.spec;
 
     uhRaw = g.state(4);
 
     if cfg.clipUH
-        uhRaw = max(ctrl.UH(1), min(ctrl.UH(end), uhRaw));
+        uhRaw = max(bc.UH(1), min(bc.UH(end), uhRaw));
     end
 
-    [~, current_idx] = min(abs(ctrl.UH(:) - uhRaw));
-    next_idx = min(numel(ctrl.UH), current_idx + 1);
+    [~, current_idx] = min(abs(bc.UH(:) - uhRaw));
+    next_idx = min(numel(bc.UH), current_idx + 1);
 
     switch lower(which)
         case 'current'
@@ -493,12 +498,12 @@ function brt = make_brt_candidate(g, cfg, which)
             error('Unknown BRT candidate type: %s', which);
     end
 
-    uh = ctrl.UH(idx);
+    uh = bc.UH(idx);
     wh = cfg.whAnchor;
 
-    [X0, U0] = ctrl.interp_xu0(uh, wh);
-    A = ctrl.interp_mtrx(ctrl.LON.Ap, uh, wh);
-    B = ctrl.interp_mtrx(ctrl.LON.Bp, uh, wh);
+    [X0, U0] = bc.interp_xu0(uh, wh);
+    A = bc.interp_mtrx(bc.LON.Ap, uh, wh);
+    B = bc.interp_mtrx(bc.LON.Bp, uh, wh);
 
     x = [g.state(4)  - X0(1); ...
          g.state(6)  - X0(3); ...
@@ -508,7 +513,7 @@ function brt = make_brt_candidate(g, cfg, which)
     insideGrid = all(x(:) >= spec.grid_min(:) - 1e-12) && ...
                  all(x(:) <= spec.grid_max(:) + 1e-12);
 
-    [V, gradV, ok] = ctrl.liveness_lon.lut.query(x, uh, wh);
+    [V, gradV, ok] = sf.lut.query(x, uh, wh);
 
     if isempty(gradV) || numel(gradV) ~= 4
         gradV = NaN(4, 1);
@@ -536,7 +541,7 @@ function brt = make_brt_candidate(g, cfg, which)
 end
 
 % -------------------------------------------------------------------------
-function [V, ok, insideGrid] = query_fixed_candidate(g, brt)
+function [V, ok, insideGrid] = query_fixed_candidate(g, c, brt)
     X0F = brt.X0F;
     uhF = brt.uhF;
     whF = brt.whF;
@@ -546,9 +551,9 @@ function [V, ok, insideGrid] = query_fixed_candidate(g, brt)
           g.state(11) - X0F(5); ...
           g.state(8)  - X0F(11)];
 
-    [V, ~, ok] = g.controller.liveness_lon.lut.query(xF, uhF, whF);
+    [V, ~, ok] = c.safety_filter.lut.query(xF, uhF, whF);
 
-    spec = g.controller.liveness_lon.spec;
+    spec = c.safety_filter.spec;
     insideGrid = all(xF(:) >= spec.grid_min(:) - 1e-12) && ...
                  all(xF(:) <= spec.grid_max(:) + 1e-12);
 end
