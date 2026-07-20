@@ -9,7 +9,7 @@ cd('C:\Users\grape\OneDrive\CAU\AISL\LpC-GUAM');
 addpath(genpath(pwd));
 
 % Trim Table setting
-S = load('trim_table_Poly_ConcatVer4p0.mat');   % resolved via MATLAB path (vehicles/Lift+Cruise/)
+S = load('trim_table_Poly_ConcatVer4p0.mat');
 % Environment Parameters
 cfg.M        = 10000;        % Total simulation steps
 cfg.whAnchor = S.WH(3);     % WH for calling trim table in perspective of BRT

@@ -185,6 +185,7 @@ classdef RSLQR < handle
         end
 
         function [X0, U0, ctrl_lon, ctrl_lat] = scheduled_params(obj, u_cmd, w_cmd)
+            
             [X0, U0] = obj.interp_xu0(u_cmd, w_cmd);
 
             ctrl_lon.Ki  = obj.interp_mtrx(obj.LON.Ki, u_cmd, w_cmd);

@@ -16,7 +16,7 @@ plans/
 docs/refs
 
 # MAT files: keep local, commit only distilled .md notes
-*.mat
+# *.mat
 
 # .md
 *.md
