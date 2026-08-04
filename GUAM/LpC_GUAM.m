@@ -1,21 +1,18 @@
 classdef LpC_GUAM < handle
     % LPC_GUAM Flat-earth (NED) 6-DOF plant for the GUAM Lift+Cruise model.
     %
-    % Pure plant. Given per-step actuator commands (rotor speeds + surface
-    % deflections), it advances its own state through first-order actuator
-    % servos, the polynomial aero-propulsive model, and RK4 integration of the
-    % rigid-body EOM. No ECI/ECEF frames — position is NED, altitude = -rd.
-    %
-    % The controller lives outside the plant: the simulation driver calls
-    % controller.control() to obtain the effector commands, then passes them to
-    % step(). step() returns nothing — its effect is the update of obj.state /
-    % obj.time (and the actual actuator positions obj.engine / obj.surface).
-    %
+    % Given per-step actuator commands (rotor speeds + surface deflections), 
+    % it advances its own state through first-order actuator servos, the 
+    % polynomial aero-propulsive model, and RK4 integration of the
+    % rigid-body EOM.
+    
     % Per-step pipeline (mirrors GUAM.slx default variants: Polynomial aero,
     % FirstOrder actuators, Simple EOM):
-    %   engine/surface servo dynamics -> standard atmosphere ->
-    %   polynomial aero-propulsive forces/moments -> 6-DOF rigid body EOM ->
-    %   RK4 state update.
+    % 1. engine/surface servo dynamics
+    % 2. standard atmosphere 
+    % 3. polynomial aero-propulsive forces/moments
+    % 4. 6-DOF rigid body EOM 
+    % 5. RK4 state update
     properties
         vehicleConfig   % VehicleConfig (also passed to the aero model as Model)
         simConfig       % SimConfig (owns dt/T and the scenario)
@@ -79,17 +76,17 @@ classdef LpC_GUAM < handle
             dt = obj.simConfig.dt;
 
             % 1. Actuator servo dynamics (advanced once; held over the RK4 stages)
-            engine  = obj.engineDynamics.step(engine_cmd);
-            surface = obj.surfaceDynamics.step(surface_cmd);
-            obj.engine  = engine;
-            obj.surface = surface;
+            engine_     = obj.engineDynamics.step(engine_cmd);
+            surface_    = obj.surfaceDynamics.step(surface_cmd);
+            obj.engine  = engine_;
+            obj.surface = surface_;
 
             % 2. RK4 integration of the 6-DOF rigid-body state
             x  = obj.state;
-            k1 = obj.state_derivative(x,             engine, surface);
-            k2 = obj.state_derivative(x + 0.5*dt*k1, engine, surface);
-            k3 = obj.state_derivative(x + 0.5*dt*k2, engine, surface);
-            k4 = obj.state_derivative(x +     dt*k3, engine, surface);
+            k1 = obj.state_derivative(x,             engine_, surface_);
+            k2 = obj.state_derivative(x + 0.5*dt*k1, engine_, surface_);
+            k3 = obj.state_derivative(x + 0.5*dt*k2, engine_, surface_);
+            k4 = obj.state_derivative(x +     dt*k3, engine_, surface_);
             obj.state = x + (dt / 6) .* (k1 + 2*k2 + 2*k3 + k4);
             obj.time  = obj.time + dt;
         end
@@ -107,29 +104,5 @@ classdef LpC_GUAM < handle
             dx = obj.rigidBody.calculate_dynamics(x, Fb, Mb);
         end
 
-        function Xlon_dot = lon_plant_rate(obj, x_full, U0, u_perturb)
-            % True longitudinal state rate for the liveness filter's nonlinear
-            % dV/dt. Assembles absolute effectors from trim (U0) plus the
-            % 11-channel effector perturbation u_perturb = [Pi1..8; Pi9; de; df]
-            % (same split/mapping as reset() and RSLQR.srface_cmd), then runs
-            % the exact plant path of step() (atmosphere -> aero -> RBD).
-            % Returns Xlon_dot = d/dt [u; w; q; theta] (rows [4;6;11;8] of dx).
-            engine        = U0(5:13);
-            engine(1:9)   = engine(1:9) + u_perturb(1:9);
-            surface       = [U0(1) - U0(2); U0(1) + U0(2); U0(3); U0(3); U0(4)];
-            surface(3)    = surface(3) + u_perturb(10);   % elevator -> LE
-            surface(4)    = surface(4) + u_perturb(10);   % elevator -> RE
-            surface(1)    = surface(1) + u_perturb(11);   % flap -> LA
-            surface(2)    = surface(2) + u_perturb(11);   % flap -> RA
-
-            [rho, a] = obj.environment.atmosphere(-x_full(3));
-            R_i2b = RSLQR.rotm_i2b(x_full(7), x_full(8), x_full(9));
-            v_air = obj.environment.airspeed_body(x_full(4:6), R_i2b);
-            x_aero = [v_air; x_full(10:12)];
-            [Fb, Mb] = run_LpC_aero(x_aero, engine, surface, rho, a, ...
-                                    obj.units, obj.vehicleConfig);
-            dx = obj.rigidBody.calculate_dynamics(x_full, Fb, Mb);
-            Xlon_dot = dx([4; 6; 11; 8]);
-        end
     end
 end
