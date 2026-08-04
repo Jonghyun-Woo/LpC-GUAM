@@ -11,8 +11,8 @@ classdef EngineDynamics < handle
         dt              % integration time step [s]
         wn              % servo bandwidth [rad/s]
         rate_limit      % rotor speed rate limit [rad/s^2]
-        pos_max         % upper speed limits (9x1) [rad/s]
-        pos_min         % lower speed limits (9x1) [rad/s]
+        engine_max         % upper speed limits (9x1) [rad/s]
+        engine_min         % lower speed limits (9x1) [rad/s]
         pos             % current rotor speeds (9x1) [rad/s]
     end
 
@@ -21,21 +21,21 @@ classdef EngineDynamics < handle
             obj.dt         = dt;
             obj.wn         = 4 * pi;                  % rad/s (setupEngines)
             obj.rate_limit = 100.0;
-            obj.pos_max    = [1600 * ones(8, 1); 2000] .* (2 * pi / 60); % rad/s
-            obj.pos_min    = zeros(9, 1);
+            obj.engine_max = [1600 * ones(8, 1); 2000] .* (2 * pi / 60); % rad/s
+            obj.engine_min = zeros(9, 1);
             obj.pos        = zeros(9, 1);
         end
 
         function reset(obj, pos0)
             % Initialize rotor speeds (e.g., at trim).
-            obj.pos = min(max(pos0(:), obj.pos_min), obj.pos_max);
+            obj.pos = min(max(pos0(:), obj.engine_min), obj.engine_max);
         end
 
         function pos = step(obj, cmd)
             % Advance the engine servo bank one time step toward cmd (9x1, rad/s).
             rate    = obj.wn .* (cmd(:) - obj.pos);
             rate    = min(max(rate, -obj.rate_limit), obj.rate_limit);
-            obj.pos = min(max(obj.pos + obj.dt .* rate, obj.pos_min), obj.pos_max);
+            obj.pos = min(max(obj.pos + obj.dt .* rate, obj.engine_min), obj.engine_max);
             pos     = obj.pos;
         end
     end
