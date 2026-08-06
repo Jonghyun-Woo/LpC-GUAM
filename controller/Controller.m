@@ -22,7 +22,7 @@ classdef Controller < handle
             % config : ControllerConfig (provides .rslqr and .filter)
             % dt     : sim timestep [s] (servo-compensator discretization)
             obj.controller_config   = config;
-            obj.baseline_controller = RSLQR(config.rslqr, dt);
+            obj.baseline_controller = RSLQR(config, dt);
 
             % Longitudinal liveness filter (production axis). Loads BRT value
             % functions from FilterConfig.tables_dir_default; passes through
@@ -30,8 +30,8 @@ classdef Controller < handle
             % breakpoints come from the baseline controller's trim table.
             filterCfg = config.filter;
             obj.safety_filter = LivenessFilter('lon', filterCfg.mode, ...
-                FilterConfig.tables_dir_default, ...
-                obj.baseline_controller.UH, obj.baseline_controller.WH);
+                                               FilterConfig.tables_dir_default, ...
+                                               obj.baseline_controller.UH, obj.baseline_controller.WH);
 
             obj.safety_filter_wh_anchor = filterCfg.wh_anchor;
             if isempty(obj.safety_filter_wh_anchor)
