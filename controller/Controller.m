@@ -61,14 +61,14 @@ classdef Controller < handle
                 case 'off'
                     % Baseline only: nothing added after the nominal allocation.
                 case {'blend', 'lr'}
-                    [c_brt_info, n_brt_info] = obj.build_brt_frames(state, U0);
+                    [curr_brt_info, next_brt_info] = obj.build_brt_frames(state, U0);
 
                     % Map the nominal 11-effector perturbation into each anchor frame.
                     u_lon_nom = perturb_cmd(1:11);
-                    c_brt_info.u_anchor_nom = u_lon_nom + c_brt_info.dtrim;
-                    n_brt_info.u_anchor_nom = u_lon_nom + n_brt_info.dtrim;
+                    curr_brt_info.u_anchor_nom = u_lon_nom + curr_brt_info.dtrim;
+                    next_brt_info.u_anchor_nom = u_lon_nom + next_brt_info.dtrim;
 
-                    [u_anchor_f, info] = obj.safety_filter.filter(c_brt_info, n_brt_info, state);
+                    [u_anchor_f, info] = obj.safety_filter.filter(curr_brt_info, next_brt_info, state);
                     perturb_cmd(1:11)  = u_anchor_f - info.target_dtrim;
                 otherwise
                     error('Controller:mode', ...
@@ -78,7 +78,7 @@ classdef Controller < handle
             [engine, surface] = obj.baseline_controller.total_cmd(perturb_cmd, U0);
         end
 
-        function [c_brt_info, n_brt_info] = build_brt_frames(obj, state, U0)
+        function [curr_brt_info, next_brt_info] = build_brt_frames(obj, state, U0)
             % Build the current/next longitudinal BRT anchor frames the liveness
             % filter selects between. The anchor UH breakpoints bracket the
             % current body-x velocity; WH is fixed to safety_filter_wh_anchor.
@@ -88,8 +88,8 @@ classdef Controller < handle
             [~, current_id] = min(abs(UH - uhA));
             next_id = min(length(UH), current_id + 1);
 
-            c_brt_info = obj.make_brt_frame(state, U0, current_id, 'current');
-            n_brt_info = obj.make_brt_frame(state, U0, next_id,    'next');
+            curr_brt_info = obj.make_brt_frame(state, U0, current_id, 'current');
+            next_brt_info = obj.make_brt_frame(state, U0, next_id,    'next');
         end
 
         function info = make_brt_frame(obj, state, U0, uh_id, name)
