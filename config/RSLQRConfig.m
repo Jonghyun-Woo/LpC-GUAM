@@ -22,8 +22,8 @@ classdef RSLQRConfig
         % trim_table_Poly_ConcatVer4p0.mat.
         trans_end = 94.8 / (1/(1852.0/0.3048/3600));   % 94.8 kts -> ft/s
 
+        %         ui   wi   qi   u w q 
         Qlon0 = [ 0.01 0.01 1000 0 0 0]'; % original 
-        %Qlon0 = [ 0.02 0.02 100 0 0 0]'; % original 
         
         % Control acceleration cost
         Rlon0 = [1 1 1]'; % original
