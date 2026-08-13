@@ -15,13 +15,13 @@ classdef LivenessFilter < handle
     % Units: ft/s, rad/s, rad.
 
     properties
-        spec
+        axis_spec
         mode
         gamma
         eps_band
         live_margin
 
-        lut
+        value_function      % ValueFunction: BRT V(x)/gradV query for this axis
 
         n_calls
         n_active
@@ -29,8 +29,8 @@ classdef LivenessFilter < handle
     end
 
     methods
-        function obj = LivenessFilter(axis, mode, tables_dir, uh_bp, wh_bp)
-            obj.spec        = FilterConfig.axisSpec(axis);
+        function obj = LivenessFilter(axis, mode, tables_dir, uh_breakpoint, wh_breakpoint)
+            obj.axis_spec   = FilterConfig.axisSpec(axis);
             obj.mode        = lower(mode);
             obj.gamma       = FilterConfig.gamma;
             obj.eps_band    = FilterConfig.eps_band;
@@ -40,7 +40,7 @@ classdef LivenessFilter < handle
                 tables_dir = FilterConfig.tables_dir_default;
             end
 
-            obj.lut = ValueFunctionLUT(obj.spec, tables_dir, uh_bp, wh_bp);
+            obj.value_function = ValueFunction(obj.axis_spec, tables_dir, uh_breakpoint, wh_breakpoint);
 
             obj.n_calls  = 0;
             obj.n_active = 0;
@@ -67,18 +67,18 @@ classdef LivenessFilter < handle
             obj.n_calls = obj.n_calls + 1;
 
             % Trim evaluation
-            c = obj.eval_brt_candidate(current_brt_info, 'current');
-            n = obj.eval_brt_candidate(next_brt_info, 'next');
-            
-            % Target Trim selection (Next 기준으로 수행)
-            transition_ready = n.valid && n.V < 0;
+            current_candidate = obj.eval_brt_candidate(current_brt_info, 'current');
+            next_candidate    = obj.eval_brt_candidate(next_brt_info, 'next');
 
-            if c.idx == n.idx
-                target = n;
+            % Target Trim selection (Next 기준으로 수행)
+            transition_ready = next_candidate.valid && next_candidate.V < 0;
+
+            if current_candidate.idx == next_candidate.idx
+                target = next_candidate;
             elseif transition_ready
-                target = n;
+                target = next_candidate;
             else
-                target = c;
+                target = current_candidate;
             end
 
             x     = target.x_anchor(:);
@@ -91,7 +91,7 @@ classdef LivenessFilter < handle
             dtrim = target.dtrim(:);
 
             % Input bounds are computed early
-            [lb, ub] = LivenessFilter.input_bounds(U0, obj.spec);
+            [lb, ub] = LivenessFilter.input_bounds(U0, obj.axis_spec);
             u0 = min(max(u_nom, lb), ub);
             
             % Initialization info struct
@@ -239,53 +239,53 @@ classdef LivenessFilter < handle
             obj.last_info = info;
         end
 
-        function cand = eval_brt_candidate(obj, brt_info, name)
+        function candidate = eval_brt_candidate(obj, brt_info, name)
             x = brt_info.x_anchor(:);
 
-            inside_grid = all(x >= obj.spec.grid_min(:) - 1e-12) && ...
-                          all(x <= obj.spec.grid_max(:) + 1e-12);
+            inside_grid = all(x >= obj.axis_spec.grid_min(:) - 1e-12) && ...
+                          all(x <= obj.axis_spec.grid_max(:) + 1e-12);
 
-            [V, gradV, ok] = obj.lut.query(x, brt_info.uhA, brt_info.whA);
+            [V, gradV, ok] = obj.value_function.query(x, brt_info.uhA, brt_info.whA);
 
             if isempty(gradV) || numel(gradV) ~= 4
                 gradV = NaN(4, 1);
             end
 
-            cand = brt_info;
-            cand.name = name;
-            cand.x_anchor = x;
-            cand.V = V;
-            cand.gradV = gradV(:);
-            cand.ok = ok;
-            cand.inside_grid = inside_grid;
-            cand.valid = ok && inside_grid && isfinite(V);
+            candidate = brt_info;
+            candidate.name = name;
+            candidate.x_anchor = x;
+            candidate.V = V;
+            candidate.gradV = gradV(:);
+            candidate.ok = ok;
+            candidate.inside_grid = inside_grid;
+            candidate.valid = ok && inside_grid && isfinite(V);
         end
 
-        function s = strip_candidate(~, cand)
+        function s = strip_candidate(~, candidate)
             % Lightweight diagnostic copy for last_info.
             s = struct();
-            s.name = cand.name;
-            s.idx = cand.idx;
-            s.uhA = cand.uhA;
-            s.whA = cand.whA;
-            s.V = cand.V;
-            s.ok = cand.ok;
-            s.inside_grid = cand.inside_grid;
-            s.valid = cand.valid;
-            s.x_anchor = cand.x_anchor;
+            s.name = candidate.name;
+            s.idx = candidate.idx;
+            s.uhA = candidate.uhA;
+            s.whA = candidate.whA;
+            s.V = candidate.V;
+            s.ok = candidate.ok;
+            s.inside_grid = candidate.inside_grid;
+            s.valid = candidate.valid;
+            s.x_anchor = candidate.x_anchor;
         end
     end
 
     methods (Static)
-        function [lb, ub] = input_bounds(U0, spec)
+        function [lb, ub] = input_bounds(U0, axis_spec)
             % Per-effector perturbation bounds:
             %
             %   lb_i = max(phys_lb_i, trim_i - Delta_i) - trim_i
             %   ub_i = min(phys_ub_i, trim_i + Delta_i) - trim_i
             %
-            % trim inputs are picked from RSLQR U0 by spec.U0_idx.
+            % trim inputs are picked from RSLQR U0 by axis_spec.U0_idx.
 
-            trim = U0(spec.U0_idx);
+            trim = U0(axis_spec.U0_idx);
             trim = trim(:);
 
             lift_lb = FilterConfig.rpm2radps(FilterConfig.Pi_lift_rpm(1));
@@ -299,12 +299,12 @@ classdef LivenessFilter < handle
             Dpush = FilterConfig.rpm2radps(FilterConfig.Delta_push_RPM);
             Dsurf = deg2rad(FilterConfig.Delta_surf_Deg);
 
-            nu = spec.nu;
+            nu = axis_spec.nu;
             lb = zeros(nu, 1);
             ub = zeros(nu, 1);
 
             for i = 1:nu
-                switch char(spec.effector_type(i))
+                switch char(axis_spec.effector_type(i))
                     case 'lift'
                         pl = lift_lb; pu = lift_ub; D = Dlift;
                     case 'push'
@@ -313,7 +313,7 @@ classdef LivenessFilter < handle
                         pl = surf_lb; pu = surf_ub; D = Dsurf;
                     otherwise
                         error('LivenessFilter:effType', ...
-                              'Unknown effector type "%s".', spec.effector_type(i));
+                              'Unknown effector type "%s".', axis_spec.effector_type(i));
                 end
 
                 lb(i) = max(pl, trim(i) - D) - trim(i);

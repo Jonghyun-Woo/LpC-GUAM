@@ -41,7 +41,7 @@ classdef FilterConfig < handle
 
     methods (Static)
         function spec = axisSpec(axis)
-            % Return the per-axis spec struct used by ValueFunctionLUT and
+            % Return the per-axis spec struct used by ValueFunction and
             % LivenessFilter. All grid data in ft/s, rad/s, rad.
             %
             %   axis : 'lon' (production) | 'lat' (verification-only)

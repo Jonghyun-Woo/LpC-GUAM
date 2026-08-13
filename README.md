@@ -22,7 +22,7 @@ step loop drives them:
 | Layer | Class | Role |
 |---|---|---|
 | Config hub | `config/Config.m` (+ `SimConfig`, `VehicleConfig`, `ControllerConfig`, `RSLQRConfig`, `FilterConfig`, `LoggerConfig`) | Central assembly of all simulation parameters |
-| Controller | `controller/Controller.m` → `RSLQR` + `LivenessFilter` (`ValueFunctionLUT`) | Gain-scheduled LQRi control + allocation, optional liveness filter; returns absolute effector commands |
+| Controller | `controller/Controller.m` → `RSLQR` + `LivenessFilter` (`ValueFunction`) | Gain-scheduled LQRi control + allocation, optional liveness filter; returns absolute effector commands |
 | Plant | `GUAM/LpC_GUAM.m` → `EngineDynamics`, `SurfaceDynamics`, `Environment`, `AeroPolynomial/`, `RBD`, `Gravity` | First-order servos → atmosphere → polynomial aero-propulsion → flat-earth 6-DOF EOM, RK4 integration |
 | Trajectory | `trajectory/ReferenceTrajectory.m` | Builds the reference tables per scenario |
 | Logging | `logger/SimLogger.m` (+ plotting helpers) | Buffers per-step data, plots, saves figures/mat |

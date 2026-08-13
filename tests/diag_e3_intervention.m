@@ -102,7 +102,7 @@ function R = run_case(idx, val, onoff, cfg)
 
     dt = g.simConfig.dt;
 
-    nu = c.safety_filter.spec.nu;
+    nu = c.safety_filter.axis_spec.nu;
 
     trace = init_full_trace(cfg.M, nu);
     trace = add_transition_trace_fields(trace, cfg.M);
@@ -195,7 +195,7 @@ function R = run_case(idx, val, onoff, cfg)
             rhs = -cfg.gamma * (selPre.V + cfg.margin);
             b   = rhs - alpha;
 
-            [lb, ub] = LivenessFilter.input_bounds(selPre.U0F, f.spec);
+            [lb, ub] = LivenessFilter.input_bounds(selPre.U0F, f.axis_spec);
         end
 
         % -----------------------------------------------------------------
@@ -478,7 +478,7 @@ end
 function brt = make_brt_candidate(g, c, cfg, which)
     bc   = c.baseline_controller;
     sf   = c.safety_filter;
-    spec = sf.spec;
+    spec = sf.axis_spec;
 
     uhRaw = g.state(4);
 
@@ -513,7 +513,7 @@ function brt = make_brt_candidate(g, c, cfg, which)
     insideGrid = all(x(:) >= spec.grid_min(:) - 1e-12) && ...
                  all(x(:) <= spec.grid_max(:) + 1e-12);
 
-    [V, gradV, ok] = sf.lut.query(x, uh, wh);
+    [V, gradV, ok] = sf.value_function.query(x, uh, wh);
 
     if isempty(gradV) || numel(gradV) ~= 4
         gradV = NaN(4, 1);
@@ -551,9 +551,9 @@ function [V, ok, insideGrid] = query_fixed_candidate(g, c, brt)
           g.state(11) - X0F(5); ...
           g.state(8)  - X0F(11)];
 
-    [V, ~, ok] = c.safety_filter.lut.query(xF, uhF, whF);
+    [V, ~, ok] = c.safety_filter.value_function.query(xF, uhF, whF);
 
-    spec = c.safety_filter.spec;
+    spec = c.safety_filter.axis_spec;
     insideGrid = all(xF(:) >= spec.grid_min(:) - 1e-12) && ...
                  all(xF(:) <= spec.grid_max(:) + 1e-12);
 end

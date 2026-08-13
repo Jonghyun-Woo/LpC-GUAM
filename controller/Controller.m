@@ -97,7 +97,7 @@ classdef Controller < handle
             % fixed WH anchor. u_anchor_nom is filled in by control() once the
             % nominal allocation is known.
             bc    = obj.baseline_controller;
-            u_idx = obj.safety_filter.spec.U0_idx;
+            u_idx = obj.safety_filter.axis_spec.U0_idx;
 
             uhA = bc.UH(uh_id);
             whA = obj.safety_filter_wh_anchor;
