@@ -33,9 +33,11 @@ classdef SurfaceDynamics < handle
 
         function pos = step(obj, cmd)
             % Advance the servo bank one time step toward cmd (5x1, rad).
-            rate    = obj.wn .* (cmd(:) - obj.pos);
-            rate    = min(max(rate, -obj.rate_limit), obj.rate_limit);
-            obj.pos = min(max(obj.pos + obj.dt .* rate, obj.pos_min), obj.pos_max);
+            % dpos    = (cmd(:) - obj.pos) .* (1 - exp(-obj.wn .* obj.dt));
+            % dp_max  = obj.rate_limit .* obj.dt;
+            % dpos    = min(max(dpos, -dp_max), dp_max);
+            % obj.pos = min(max(obj.pos + dpos, obj.pos_min), obj.pos_max);
+            obj.pos = min(max(cmd(:), obj.pos_min), obj.pos_max);
             pos     = obj.pos;
         end
     end

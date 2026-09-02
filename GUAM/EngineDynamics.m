@@ -33,9 +33,11 @@ classdef EngineDynamics < handle
 
         function pos = step(obj, cmd)
             % Advance the engine servo bank one time step toward cmd (9x1, rad/s).
-            rate    = obj.wn .* (cmd(:) - obj.pos);
-            rate    = min(max(rate, -obj.rate_limit), obj.rate_limit);
-            obj.pos = min(max(obj.pos + obj.dt .* rate, obj.engine_min), obj.engine_max);
+            % dpos    = (cmd(:) - obj.pos) .* (1 - exp(-obj.wn .* obj.dt));
+            % dp_max  = obj.rate_limit .* obj.dt;
+            % dpos    = min(max(dpos, -dp_max), dp_max);
+            % obj.pos = min(max(obj.pos + dpos, obj.engine_min), obj.engine_max);
+            obj.pos = min(max(cmd(:), obj.engine_min), obj.engine_max);
             pos     = obj.pos;
         end
     end

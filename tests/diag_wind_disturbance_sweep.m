@@ -9,6 +9,17 @@ max_dF = nan(3, 20);
 min_dF = nan(3, 20);
 max_dM = nan(3, 20);
 min_dM = nan(3, 20);
+% (alpha, beta) [deg] at which each extreme occurs: (component, idx, [alpha beta])
+max_dF_ab = nan(3, 20, 2);
+min_dF_ab = nan(3, 20, 2);
+max_dM_ab = nan(3, 20, 2);
+min_dM_ab = nan(3, 20, 2);
+% body-frame wind unit direction [x_fwd; y_right; z_down] at each extreme (|wind| = 10 m/s):
+% (component, idx, [wx wy wz])
+max_dF_wind = nan(3, 20, 3);
+min_dF_wind = nan(3, 20, 3);
+max_dM_wind = nan(3, 20, 3);
+min_dM_wind = nan(3, 20, 3);
 WH = 3;
 
 for idx = 1 : 20
@@ -42,28 +53,28 @@ for idx = 1 : 20
     
     alpha_deg = -180:5:180;    % wind AoA sweep
     beta_deg  = -180:5:180;    % wind AoS sweep
-    Na = numel(alpha_deg);  Nb = numel(beta_deg);
-    dVel_b = zeros(3, Na, Nb);   % disturbance acceleration           in body frame
-    dOmg_b = zeros(3, Na, Nb);   % disturbance angular acceleration   in body frame
-    valid = true(Na, Nb);      % aero-database validity of each sweep point
-    
-    for ia = 1:Na
-        for ib = 1:Nb
-            a = deg2rad(alpha_deg(ia));
-            b = deg2rad(beta_deg(ib));
-            % 10 m/s wind, direction (a,b) in body axes (aero convention)
-            w_body = Vw * [cos(a)*cos(b); sin(b); sin(a)*cos(b)];
+    N_alpha = numel(alpha_deg);  N_beta = numel(beta_deg);
+    dVel_b = zeros(3, N_alpha, N_beta);   % disturbance acceleration           in body frame
+    dOmg_b = zeros(3, N_alpha, N_beta);   % disturbance angular acceleration   in body frame
+    valid = true(N_alpha, N_beta);      % aero-database validity of each sweep point
+
+    for i_alpha = 1:N_alpha
+        for i_beta = 1:N_beta
+            alpha_rad = deg2rad(alpha_deg(i_alpha));
+            beta_rad  = deg2rad(beta_deg(i_beta));
+            % 10 m/s wind, direction (alpha, beta) in body axes (aero convention)
+            w_body = Vw * [cos(alpha_rad)*cos(beta_rad); sin(beta_rad); sin(alpha_rad)*cos(beta_rad)];
             GUAM.environment.wind_ned = R_b2i * w_body;   % inject as body-frame wind
-    
+
             ddx = GUAM.state_derivative(X0, engine0, surface0) - dx0;
-            dVel_b(:, ia, ib) = ddx(4:6);     % dF <- acc
-            dOmg_b(:, ia, ib) = ddx(10:12);   % dM <- omega_dot
-    
+            dVel_b(:, i_alpha, i_beta) = ddx(4:6);     % dF <- acc
+            dOmg_b(:, i_alpha, i_beta) = ddx(10:12);   % dM <- omega_dot
+
             % Re-run the aero model to read back its validity flags.
             v_air = X0(4:6) - w_body;
             [~, ~, Validity] = run_LpC_aero([v_air; X0(10:12)], engine0, surface0, ...
                                             rho, a_snd, GUAM.units, GUAM.vehicleConfig);
-            valid(ia, ib) = ~any(Validity);
+            valid(i_alpha, i_beta) = ~any(Validity);
         end
     end
     GUAM.environment.wind_ned = zeros(3, 1);   % restore calm air
@@ -73,11 +84,41 @@ for idx = 1 : 20
     dOmg_b(:, ~valid) = NaN;
     fprintf('aero-database validity: %d / %d sweep points excluded (%.1f%%)\n', ...
             nnz(~valid), numel(valid), 100 * nnz(~valid) / numel(valid));
-    max_dF(:, idx) = max(dVel_b, [], [2, 3]);
-    min_dF(:, idx) = min(dVel_b, [], [2, 3]);
-    max_dM(:, idx) = max(dOmg_b, [], [2, 3]);
-    min_dM(:, idx) = min(dOmg_b, [], [2, 3]);
+    for comp = 1:3
+        slice_F = reshape(dVel_b(comp, :, :), N_alpha, N_beta);
+        slice_M = reshape(dOmg_b(comp, :, :), N_alpha, N_beta);
+
+        % dF: on ties, take the smaller-sideslip direction (beta near 0 / 180 deg)
+        [max_dF(comp, idx), a_at, b_at] = extreme_ab(slice_F, true,  'min', alpha_deg, beta_deg);
+        max_dF_ab(comp, idx, :)   = [a_at, b_at];
+        max_dF_wind(comp, idx, :) = wind_body_unit(a_at, b_at);
+        [min_dF(comp, idx), a_at, b_at] = extreme_ab(slice_F, false, 'min', alpha_deg, beta_deg);
+        min_dF_ab(comp, idx, :)   = [a_at, b_at];
+        min_dF_wind(comp, idx, :) = wind_body_unit(a_at, b_at);
+
+        % dM: on ties, take the larger-sideslip direction (beta near +/-90 deg)
+        [max_dM(comp, idx), a_at, b_at] = extreme_ab(slice_M, true,  'max', alpha_deg, beta_deg);
+        max_dM_ab(comp, idx, :)   = [a_at, b_at];
+        max_dM_wind(comp, idx, :) = wind_body_unit(a_at, b_at);
+        [min_dM(comp, idx), a_at, b_at] = extreme_ab(slice_M, false, 'max', alpha_deg, beta_deg);
+        min_dM_ab(comp, idx, :)   = [a_at, b_at];
+        min_dM_wind(comp, idx, :) = wind_body_unit(a_at, b_at);
+    end
 end
+
+save('guam_disturbance_lb_ub_10mps.mat',...
+        'max_dF',...
+        'min_dF',...
+        'max_dM',...
+        'min_dM',...
+        'max_dF_ab',...
+        'min_dF_ab',...
+        'max_dM_ab',...
+        'min_dM_ab',...
+        'max_dF_wind',...
+        'min_dF_wind',...
+        'max_dM_wind',...
+        'min_dM_wind');
 
 % Disturbance magnitude profiles over the (alpha, beta) grid
 [BB, AA] = meshgrid(beta_deg, alpha_deg);
@@ -148,9 +189,79 @@ ylabel('Max Disturbance Angular Acceleration', 'Interpreter', 'latex', 'FontSize
 
 subplot(2, 2, 4);
 hold on; grid on;
-plot(indices, min_dM(1, :), '-o', 'DisplayName', 'Min $\dot{p}$'); 
-plot(indices, min_dM(2, :), '-o', 'DisplayName', 'Min $\dot{q}$'); 
-plot(indices, min_dM(3, :), '-o', 'DisplayName', 'Min $\dot{r}$'); 
+plot(indices, min_dM(1, :), '-o', 'DisplayName', 'Min $\dot{p}$');
+plot(indices, min_dM(2, :), '-o', 'DisplayName', 'Min $\dot{q}$');
+plot(indices, min_dM(3, :), '-o', 'DisplayName', 'Min $\dot{r}$');
 legend('Location', 'southeast', 'Interpreter', 'latex');
 xlabel('Index of Trim Conditions', 'Interpreter', 'latex', 'FontSize', font_size);
 ylabel('Min Disturbance Angular Acceleration', 'Interpreter', 'latex', 'FontSize', font_size);
+
+%%
+% Per-component figures: extreme (max/min) value and the body-frame wind direction
+% (unit vector, |wind| = 10 m/s) that produced it.
+comp_name = {'\dot{u}', '\dot{v}', '\dot{w}', '\dot{p}', '\dot{q}', '\dot{r}'};
+comp_unit = {'ft/$s^2$', 'ft/$s^2$', 'ft/$s^2$', 'rad/$s^2$', 'rad/$s^2$', 'rad/$s^2$'};
+wind_axis = {'$W_x$ (fwd)', '$W_y$ (right)', '$W_z$ (down)'};
+Val_max  = [max_dF;             max_dM];             % 6 x 20
+Val_min  = [min_dF;             min_dM];             % 6 x 20
+Wind_max = cat(1, max_dF_wind, max_dM_wind);         % 6 x 20 x [wx wy wz]
+Wind_min = cat(1, min_dF_wind, min_dM_wind);         % 6 x 20 x [wx wy wz]
+font_size = 14;
+for k = 1:6
+    name = comp_name{k};
+    figure('Name', sprintf('Extreme %s and body-frame wind direction that produced it', name));
+
+    subplot(4, 1, 1);
+    hold on; grid on;
+    plot(indices, Val_max(k, :), '-o', 'DisplayName', ['Max $' name '$']);
+    plot(indices, Val_min(k, :), '-o', 'DisplayName', ['Min $' name '$']);
+    legend('Location', 'best', 'Interpreter', 'latex');
+    % xlabel('Index of Trim Conditions', 'Interpreter', 'latex', 'FontSize', font_size);
+    ylabel(['$' name '$ [' comp_unit{k} ']'], 'Interpreter', 'latex', 'FontSize', font_size);
+
+    % Body-axis components of the incoming-wind unit vector at the max / min point
+    for ax = 1:3
+        subplot(4, 1, ax + 1);
+        hold on; grid on;
+        plot(indices, 10.*Wind_max(k, :, ax), '-o', 'DisplayName', ['at Max $' name '$']);
+        plot(indices, 10.*Wind_min(k, :, ax), '-o', 'DisplayName', ['at Min $' name '$']);
+        ylim([-10.1, 10.1]);
+        legend('Location', 'best', 'Interpreter', 'latex');
+        if ax == 3
+            xlabel('Index of Trim Conditions', 'Interpreter', 'latex', 'FontSize', font_size);
+        end
+        ylabel(['wind ' wind_axis{ax}], 'Interpreter', 'latex', 'FontSize', font_size);
+    end
+end
+
+function [val, alpha_at, beta_at] = extreme_ab(slice, is_max, beta_pref, alpha_deg, beta_deg)
+% Extreme value of a (N_alpha x N_beta) slice and the (alpha, beta) [deg] at which
+% it occurs. On ties, beta_pref selects by sideslip magnitude |sin(beta)|:
+%   'min' -> beta closest to 0 / 180 deg (least sideways wind)
+%   'max' -> beta closest to +/-90 deg  (most sideways wind)
+    if all(isnan(slice(:)))
+        val = NaN; alpha_at = NaN; beta_at = NaN; return;
+    end
+    if is_max
+        val = max(slice, [], 'all');
+    else
+        val = min(slice, [], 'all');
+    end
+    [rows, cols] = find(slice == val);       % rows = alpha index, cols = beta index
+    sideslip = abs(sind(beta_deg(cols)));    % |sin(beta)|: 0 at 0/180 deg, 1 at +/-90 deg
+    if strcmp(beta_pref, 'min')
+        [~, sel] = min(sideslip);
+    else
+        [~, sel] = max(sideslip);
+    end
+    alpha_at = alpha_deg(rows(sel));
+    beta_at  = beta_deg(cols(sel));
+end
+
+function w = wind_body_unit(alpha_deg, beta_deg)
+% Body-frame unit direction of the incoming wind for aero incidence (alpha, beta) [deg],
+% matching the sweep convention w_body = Vw * [cos a cos b; sin b; sin a cos b].
+    a = deg2rad(alpha_deg);
+    b = deg2rad(beta_deg);
+    w = [cos(a) * cos(b); sin(b); sin(a) * cos(b)];
+end
