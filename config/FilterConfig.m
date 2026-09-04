@@ -28,7 +28,15 @@ classdef FilterConfig < handle
         srf_deg     = [-30, 30];    % control-surface deflection physical bounds (deg)
 
         % Default directory scanned for BRT value-function .mat files.
-        tables_dir_default = 'tables/BRT';
+        %
+        % Was 'tables/BRT', a directory that does not exist in this repository;
+        % combined with a channel prefix that omitted the BRT_ segment, the LUT
+        % matched zero files and reported available = 0. The filter then ran as
+        % a no-op no matter what mode was selected - a silent failure, since
+        % nothing downstream checks whether any table was actually loaded.
+        % Verified: LivenessFilter('lon','blend',...) loaded 0 tables from
+        % either path before this change.
+        tables_dir_default = 'data';
     end
 
     methods
@@ -59,7 +67,7 @@ classdef FilterConfig < handle
                     spec.grid_max   = [16; 33; 1.5; 0.75];
                     spec.grid_num   = [21; 41; 61; 31];
                     spec.target_ub  = [3; 1.5; 0.05; 0.05];
-                    spec.brt_prefix = 'GUAM_LON_HJIR';
+                    spec.brt_prefix = 'GUAM_LON_BRT_HJIR';   % matches data/GUAM_LON_BRT_HJIR_UH*_WH*.mat
                     spec.nu         = 11;                    % [Pi_1..8, Pi_9(pusher), delta_e, delta_f]
                     spec.U0_idx     = [5:12, 13, 3, 1];      % lift1..8, pusher, elevator, flap
                     % Effector type per filter slot: 8x lift, 1x push, 2x surface

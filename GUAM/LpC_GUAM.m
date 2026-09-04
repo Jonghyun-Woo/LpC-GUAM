@@ -23,7 +23,7 @@ classdef LpC_GUAM < handle
         rigidBody       % RBD 6-DOF equations of motion
         aeroFrame       % AeroFrame (alpha/beta/airspeed for logging)
         environment     % Environment (flat-earth atmosphere + steady wind)
-        controller      % RSLQR gain-scheduled controller
+        controller      % Controller (RSLQR baseline + liveness safety filter)
         engineDynamics  % EngineDynamics (9 rotor speed servos)
         surfaceDynamics % SurfaceDynamics (5 surface servos [LA RA LE RE RUD])
 
@@ -46,8 +46,7 @@ classdef LpC_GUAM < handle
             obj.rigidBody       = RBD(cfg.vehicle);
             obj.aeroFrame       = AeroFrame();
             obj.environment     = Environment();
-            obj.controller      = RSLQR(cfg.controller.rslqr, ...
-                                        cfg.controller.filter, cfg.sim.dt);
+            obj.controller      = Controller(cfg.controller, cfg.sim.dt);
             obj.engineDynamics  = EngineDynamics(cfg.sim.dt);
             obj.surfaceDynamics = SurfaceDynamics(cfg.sim.dt);
 
@@ -58,23 +57,16 @@ classdef LpC_GUAM < handle
             % Initialize the vehicle at the trim condition of the first
             % reference-trajectory point (as GUAM's setupTrim does for the
             % initial reference velocity).
-            uh0 = obj.refTraj.vel(1, 1);
-            wh0 = obj.refTraj.vel(3, 1);
-            [X0, U0] = obj.controller.interp_xu0(uh0, wh0);
+            % The trim state and the trim actuator positions both come from the
+            % controller, which assembles the surface vector through the same
+            % total_cmd() path the control law uses. Doing it here as well used
+            % to duplicate that [flap-ail; flap+ail; ele; ele; rud] ordering, so
+            % a change on one side would silently disagree with the other.
+            [x0, engine0, surface0] = obj.controller.initial_condition(obj.refTraj);
 
-            obj.state         = zeros(12, 1);
-            obj.state(1:3)    = obj.refTraj.pos(:, 1);  % NED position
-            obj.state(4:6)    = X0(1:3);            % body velocity at trim
-            obj.state(7:9)    = X0(10:12);          % Euler angles at trim
-            obj.state(10:12)  = X0(4:6);            % body rates at trim
-
-            % Actuators start at trim settings
-            obj.engineDynamics.reset(U0(5:13));
-            obj.surfaceDynamics.reset([U0(1) - U0(2);...
-                                       U0(1) + U0(2);...
-                                       U0(3);...
-                                       U0(3);...
-                                       U0(4)]);
+            obj.state = x0;
+            obj.engineDynamics.reset(engine0);
+            obj.surfaceDynamics.reset(surface0);
             obj.controller.reset();
             obj.time = 0;
         end
@@ -107,29 +99,43 @@ classdef LpC_GUAM < handle
             obj.time  = obj.time + obj.simConfig.dt;
         end
 
-        function Xlon_dot = lon_plant_rate(obj, x_full, U0, u_perturb)
-            % True longitudinal state rate for the liveness filter's nonlinear
-            % dV/dt. Assembles absolute effectors from trim (U0) plus the
-            % 11-channel effector perturbation u_perturb = [Pi1..8; Pi9; de; df]
-            % (same split/mapping as reset() and RSLQR.srface_cmd), then runs
-            % the exact plant path of step() (atmosphere -> aero -> RBD).
-            % Returns Xlon_dot = d/dt [u; w; q; theta] (rows [4;6;11;8] of dx).
-            engine        = U0(5:13);
-            engine(1:9)   = engine(1:9) + u_perturb(1:9);
-            surface       = [U0(1) - U0(2); U0(1) + U0(2); U0(3); U0(3); U0(4)];
-            surface(3)    = surface(3) + u_perturb(10);   % elevator -> LE
-            surface(4)    = surface(4) + u_perturb(10);   % elevator -> RE
-            surface(1)    = surface(1) + u_perturb(11);   % flap -> LA
-            surface(2)    = surface(2) + u_perturb(11);   % flap -> RA
+        function s = saveState(obj)
+            % SAVESTATE snapshot of every piece of memory the closed loop
+            % carries. Needed by the reference governor, which rolls the
+            % whole loop forward as a "what-if" prediction and then rewinds.
+            %
+            % Missing ANY of these makes the prediction disagree with what
+            % the vehicle would actually do:
+            %   state      : rigid-body 12 states
+            %   eng/srf    : first-order servo positions (actuators lag)
+            %   ctrl_*_i   : RSLQR servo-compensator integrators. These are
+            %                wound up by past error; starting a rollout with
+            %                them zeroed under-predicts the acceleration and
+            %                therefore under-predicts the overshoot.
+            %   phi_v/theta_v : virtual attitude effectors fed back by the
+            %                allocation
+            s = struct( ...
+                'state',      obj.state, ...
+                'time',       obj.time, ...
+                'eng_pos',    obj.engineDynamics.pos, ...
+                'srf_pos',    obj.surfaceDynamics.pos, ...
+                'ctrl_lon_i', obj.controller.baseline_controller.ctrl_lon_i, ...
+                'ctrl_lat_i', obj.controller.baseline_controller.ctrl_lat_i, ...
+                'phi_v',      obj.controller.baseline_controller.phi_v, ...
+                'theta_v',    obj.controller.baseline_controller.theta_v);
+        end
 
-            [rho, a] = obj.environment.atmosphere(-x_full(3));
-            R_i2b = RSLQR.rotm_i2b(x_full(7), x_full(8), x_full(9));
-            v_air = obj.environment.airspeed_body(x_full(4:6), R_i2b);
-            x_aero = [v_air; x_full(10:12)];
-            [Fb, Mb] = run_LpC_aero(x_aero, engine, surface, rho, a, ...
-                                    obj.units, obj.vehicleConfig);
-            dx = obj.rigidBody.calculate_dynamics(x_full, Fb, Mb);
-            Xlon_dot = dx([4; 6; 11; 8]);
+        function restoreState(obj, s)
+            % RESTORESTATE rewind to a snapshot taken by saveState.
+            obj.state                 = s.state;
+            obj.time                  = s.time;
+            obj.engineDynamics.pos    = s.eng_pos;
+            obj.surfaceDynamics.pos   = s.srf_pos;
+            bc = obj.controller.baseline_controller;
+            bc.ctrl_lon_i = s.ctrl_lon_i;
+            bc.ctrl_lat_i = s.ctrl_lat_i;
+            bc.phi_v      = s.phi_v;
+            bc.theta_v    = s.theta_v;
         end
     end
 end

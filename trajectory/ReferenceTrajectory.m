@@ -16,10 +16,25 @@ classdef ReferenceTrajectory
     % of the inertial velocity into the heading frame before returning.
 
     methods (Static)
-        function ref = build(scenario, dt, T, target_vel)
+        function topts = trimOpts(dt, overrides)
+            % Options handed to TrimScheduleTrajectory.build. Kept public so
+            % a governor script can build the SAME schedule the plant sees:
+            %   traj = TrimScheduleTrajectory.build( ...
+            %              ReferenceTrajectory.trimOpts(dt, params));
+            if nargin < 2 || isempty(overrides), overrides = struct(); end
+            topts = struct('dt', dt);
+            T_seg = getfield_default(overrides, 'T_seg', []);
+            if ~isempty(T_seg), topts.T_seg = T_seg; end
+        end
+
+        function ref = build(scenario, dt, T, target_vel, overrides)
             % BUILD reference trajectory table for a scenario.
-            %   scenario : 'althold' (default) | 'climb'
-            %   dt, T    : time grid parameters (from SimConfig)
+            %   scenario  : 'althold' (default) | 'climb' | 'trim_schedule'
+            %   dt, T     : time grid parameters (from SimConfig)
+            %   overrides : optional struct; .T_seg sets the per-segment
+            %               time of the 'trim_schedule' mission so the
+            %               plant-side reference and the governor's own
+            %               schedule cannot drift apart
             %   ref      : struct with fields
             %                time   (1xN)  - time grid [s]
             %                pos    (3xN)  - NED position [ft]
@@ -27,6 +42,67 @@ classdef ReferenceTrajectory
             %                chi    (1xN)  - heading angle [rad]
             %                chidot (1xN)  - heading rate [rad/s]
             if nargin < 1 || isempty(scenario), scenario = 'althold'; end
+            if nargin < 5 || isempty(overrides), overrides = struct(); end
+
+            % Trim-schedule mission for the guidance governor: forward speed
+            % follows the 20-trim BRT anchor schedule (TrimScheduleTrajectory),
+            % passing through every BRT target-set origin in (u, theta) trim
+            % space. Sim-side we only need the position/velocity tables; the
+            % trim-space bookkeeping (T_seg, anchors, progress) rides along in
+            % ref.trim_schedule for the governor/liveness prediction.
+            %
+            % Frame rule (same as lon_brt_verify): vel(3) is the
+            % heading/inertial vertical velocity -> level flight = 0.
+            %
+            % VERTICAL PROFILE. Two choices, and they are not equivalent.
+            %
+            %   descend_rate = 0 (default, shipped behaviour)
+            %       Level at 80 ft. The 20 trim points are WH3 points, trimmed
+            %       at an 11.667 ft/s descent, so flying level leaves the
+            %       aircraft a standing -11.7 ft/s off every anchor on the
+            %       vertical-speed axis, plus up to +2.2 deg in pitch. The
+            %       reachable sets still contain it - V stays near -0.20 - but
+            %       most of the room to manoeuvre is spent before the vehicle
+            %       accelerates at all. Measured: level flight admits a uniform
+            %       1.0 ft/s^2 where sitting on the anchors admits 3.5.
+            %
+            %   descend_rate = WH (11.667 ft/s, i.e. 700 ft/min)
+            %       The condition the anchors and their sets were built for.
+            %       Measured against the simulator, the aircraft then settles
+            %       within 0.7 ft/s and 0.1 deg of every trim point, and the
+            %       standing offset disappears. Costs altitude: descend_rate
+            %       times the mission length, so the start altitude is set from
+            %       end_alt plus that.
+            %
+            % Left off by default because every result recorded before
+            % 2026-08-20 - the governor studies, the band schedule, the fixed
+            % anchor timings - was flown level, and switching silently would
+            % invalidate them.
+            if strcmp(scenario, 'trim_schedule')
+                tst = TrimScheduleTrajectory.build( ...
+                          ReferenceTrajectory.trimOpts(dt, overrides));
+                N   = numel(tst.time);
+                vel = zeros(3, N);
+                vel(1, :) = tst.lon(1, :);          % forward speed = trim UH schedule
+                pos = zeros(3, N);
+                pos(1, :) = cumtrapz(tst.time, vel(1, :));
+
+                wdot = getfield_default(overrides, 'descend_rate', 0);
+                if wdot == 0
+                    pos(3, :) = -80;                % hold 80 ft up
+                else
+                    end_alt   = getfield_default(overrides, 'end_alt', 100);
+                    vel(3, :) = wdot;               % + is down in NED
+                    pos(3, :) = -(end_alt + wdot * (tst.time(end) - tst.time)) ;
+                end
+                ref = struct('time',   tst.time, ...
+                             'pos',    pos, ...
+                             'vel',    vel, ...
+                             'chi',    zeros(1, N), ...
+                             'chidot', zeros(1, N), ...
+                             'trim_schedule', tst);
+                return;
+            end
 
             time = 0 : dt : T;
             N    = numel(time);

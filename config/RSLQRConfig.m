@@ -1,9 +1,37 @@
 classdef RSLQRConfig
     
     properties (Constant)
-        Qlon0 = [ 0.01 0.01 1000 0 0 0]'; % original 
-        %Qlon0 = [ 0.02 0.02 100 0 0 0]'; % original 
-        
+        L_trim = 1;
+        M_trim = 3;
+        N_trim = 28;
+
+        % Gain source flag. false => load the stored gains from
+        % trim_table_Poly_ConcatVer4p0.mat (default). true => redesign the
+        % LQR gains from the Qlon/Rlon/Wlon (and lat) weights below via
+        % RSLQR.set_gains at construction.
+        update_gains = true;
+
+        rho  = 0.0023769;   % slugs/ft^3
+        grav = 32.17405;    % ft/sec^2
+        ft2kts = 1/(1852.0/0.3048/3600);
+
+        % Transition-end body x-velocity [ft/s]. Above this speed the offline
+        % gain design (ctrl_lon/ctrl_lat) zeros the 8 lift-rotor B-columns so
+        % the cruise controller uses aero surfaces + pusher only.
+        % Value matches Trim_Ver4p0 (trans_end = 94.8 kts) used to build
+        % trim_table_Poly_ConcatVer4p0.mat.
+        trans_end = 94.8 / (1/(1852.0/0.3048/3600));   % 94.8 kts -> ft/s
+
+        % Longitudinal state cost, [int_u int_w int_q | du dw dq].
+        % q1 0.01 -> 0.08 raises Ki(1,1) = sqrt(q1/r1) and so the speed-loop
+        % bandwidth; q4 0 -> 2.0 adds proportional action on the speed error.
+        % Measured over the trim-schedule mission: peak speed error
+        % 11.30 -> 4.45 ft/s, peak position error 38.3 -> 11.5 ft.
+        % q2 must be left alone - raising it trades altitude for speed.
+        Qlon0 = [ 0.08 0.01 1000 2.0 0 0]';
+        %Qlon0 = [ 0.01 0.01 1000 0 0 0]'; % original
+        %Qlon0 = [ 0.02 0.02 100 0 0 0]'; % original
+
         % Control acceleration cost
         Rlon0 = [1 1 1]'; % original
         
@@ -12,9 +40,7 @@ classdef RSLQRConfig
         Wlon0 = [ 1 1 1 1 1 1 1 1 1 1000 10000000 0.1]'; % Modified effector output order to match the simulation allocation
         %Wlon0 = [ 1 1 1 1 1 1 1 1 1 1000 10000000 1]'; % Modified effector output order to match the simulation allocation
         %Wlon0 = [ 0.1 0.1 0.1 0.1 0.1 0.1 0.1 0.1 1 1000 10000000 0.01]'; % Modified effector output order to match the simulation allocation
-        N_trim = 28;
-        M_trim = 3;
-        L_trim = 1;
+        
         Qlon = repmat(RSLQRConfig.Qlon0, [1,RSLQRConfig.N_trim,RSLQRConfig.M_trim,RSLQRConfig.L_trim]);
         Rlon = repmat(RSLQRConfig.Rlon0, [1,RSLQRConfig.N_trim,RSLQRConfig.M_trim,RSLQRConfig.L_trim]);
         Wlon = repmat(RSLQRConfig.Wlon0, [1,RSLQRConfig.N_trim,RSLQRConfig.M_trim,RSLQRConfig.L_trim]);
@@ -55,7 +81,7 @@ classdef RSLQRConfig
 
         % NOTE: the servo-compensator discretization step (dt) is NOT stored
         % here. It is owned by SimConfig and injected into RSLQR at
-        % construction (RSLQR(rslqrCfg, filterCfg, dt)) so sim and controller
+        % construction (RSLQR(rslqrCfg, dt)) so sim and controller
         % share a single dt. This class holds gains/limits only.
     end
 

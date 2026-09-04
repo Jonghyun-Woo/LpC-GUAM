@@ -5,8 +5,7 @@ blending_method  = 2;
 Units.deg = pi/180;
 Units.knot = 1.6878;
 a = 1125.33; % Speed of sound ft/sec
-SimIn.numEngines = 9;
-[CModel ] = LpC_model_parameters(SimIn);
+[CModel ] = LpC_model_parameters();
 
 % call the aero function at the current state and input location
 [X,Y,Z,L,M,N,~] = LpC_aero_p_v2(x,u(5:13),[u(1)+u(2), u(1)-u(2), u(3), u(3), u(4)],rho,a,blending_method,Units,CModel);
@@ -87,5 +86,4 @@ for ii = 1:13
     F_u(:,ii) = [(X1-X2)/du(ii); (Y1-Y2)/du(ii); (Z1-Z2)/du(ii)];
     M_u(:,ii) = [(L1-L2)/du(ii); (M1-M2)/du(ii); (N1-N2)/du(ii)];
 end
-
 

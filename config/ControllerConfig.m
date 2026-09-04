@@ -22,7 +22,8 @@ classdef ControllerConfig < handle
             obj.target_vel = getfield_default(overrides, 'target_vel', obj.target_vel);
             obj.rslqr      = RSLQRConfig();
             obj.filter     = FilterConfig(overrides);
-            obj.refTraj    = ReferenceTrajectory.build(scenario, dt, T, obj.target_vel);
+            obj.refTraj    = ReferenceTrajectory.build(scenario, dt, T, ...
+                                                      obj.target_vel, overrides);
         end
 
         function ref = getReferenceTrajectory(obj)
