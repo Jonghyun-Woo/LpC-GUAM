@@ -20,3 +20,6 @@ docs/refs
 
 # Test Scripts
 Refactoring/tests/*
+
+# Heavy data files
+reachable_data/
