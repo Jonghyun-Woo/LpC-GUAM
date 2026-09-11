@@ -1,13 +1,15 @@
-% Quantify the linear-vs-nonlinear model residual as a DISTURBANCE ENVELOPE.
+% Model-mismatch DISTURBANCE ENVELOPE, per-axis method (see channel order below).
 %
-%   e(dev,u) = f_nl(x0+dev, u_trim+u) - (Ap*dev + Bp*u)   [state-rate units]
-%   Y(dev)   = max_u |e(dev,u)|                            (bang-bang input set)
+%   lon (trim-only):  e(dev) = f_nl(x0+dev, u_trim) - Ap*dev
+%                     fit over inner REGION_FRAC=0.5 grid, plain OLS (no inflation).
+%   lat (envelope):   Y(dev) = max_u |f_nl(x0+dev, u_trim+u) - (Ap*dev + Bp*u)|  (bang-bang)
+%                     fit over the FULL grid, OLS + per-channel inflation to upper-bound Y.
 %
-% For each channel/UH: evaluate Y over a uniform grid of state deviations
-% (full grid), fit a full 2nd-order polynomial in normalised z = dev./half,
-% then INFLATE each channel by s = max_k Y/fit so the fit upper-bounds Y:
-%   e_c(z) = phi(z) * (s_c * beta_c)
-%   phi(z) = [1, z1..z4, z1^2..z4^2, z1z2,z1z3,z1z4,z2z3,z2z4,z3z4]  (15 terms)
+% Why they differ: the lat r-channel residual grows toward the grid edge, so it needs a
+% full-grid upper-bounding envelope; the lon inflation blows up 20-27x at extreme UH (q-chan)
+% and lon was already a valid certificate, so lon is left trim-only.
+%
+%   e_c(z) = phi(z) * beta_c,  phi(z) = [1, z1..z4, z1^2..z4^2, pairwise]  (15 terms), z=dev/half
 
 clear; clc;
 here = fileparts(mfilename('fullpath'));
@@ -20,10 +22,10 @@ outDir      = fullfile(root, 'reachable_data', 'mc_verify');
 UH_LIST     = 1:20;
 WH_IDX      = 3;
 NG_PER_DIM  = 7;       % uniform grid per dim: 7^4 = 2401 state points
-N_NU        = 24;      % random input samples per deviation (bang-bang envelope)
+N_NU        = 24;      % random input samples per deviation (lat bang-bang envelope)
 DT          = 0.01;
-REGION_FRAC = 1.0;     % fit over the FULL grid so r-growth is captured (prev trim-only: 0.5)
 FIT_FLOOR   = 1e-3;    % ignore near-zero fit when computing inflation scalar
+REGION_FRAC = struct('lon', 0.5, 'lat', 1.0);  % lon: inner tube (trim-only); lat: full grid
 % -------------------------------------------------------------------------
 
 if ~exist(outDir, 'dir'), mkdir(outDir); end
@@ -34,16 +36,17 @@ GUAM      = LpC_GUAM(Config('althold', struct('dt', DT)));
 axes_ = struct('name', {'lon', 'lat'}, 'chan', {{'u','w','q','th'}, {'v','p','r','ph'}});
 D = struct('lon', struct([]), 'lat', struct([]));
 
-fprintf('Envelope Y = max_u |f_nl(x0+dev,u_trim+u) - (Ap*dev + Bp*u)|\n');
-fprintf('OLS quad fit + per-channel inflation to upper-bound Y.\n');
-fprintf('cover%% = %% grid where envelope >= Y (target ~100);  r-chan highlighted:\n\n');
+fprintf('lon = trim-only OLS,  lat = max-over-u envelope + inflation\n');
+fprintf('r/q-chan per UH (infl=1 & low cover on lon is expected -- OLS is not an upper bound):\n\n');
 
 for ai = 1:2
     axisName = axes_(ai).name;
+    is_lon   = strcmp(axisName, 'lon');
     gridInfo = brt.(axisName);
     half     = (gridInfo.gmax - gridInfo.gmin) / 2;
     cen      = (gridInfo.gmax + gridInfo.gmin) / 2;
     prow     = gridInfo.prow;
+    frac     = REGION_FRAC.(axisName);
 
     fprintf('== %s ==  channels [%s]\n', upper(axisName), strjoin(axes_(ai).chan, ' '));
     for ui = 1:numel(UH_LIST)
@@ -56,64 +59,60 @@ for ai = 1:2
         state0  = [0; 0; -100; XU0(1:3); XU0(10:12); XU0(4:6)];
         trimRef = state0(prow);
 
-        % perturbation bounds about trim (bang-bang box), then random samples
-        sched      = struct('axis', axisName, 'U0', U0);
-        uTrim      = U0(gridInfo.U0_idx);
-        sched.lb   = max(gridInfo.pl, uTrim + gridInfo.Dlo) - uTrim;
-        sched.ub   = min(gridInfo.pu, uTrim + gridInfo.Dhi) - uTrim;
-        us         = sched.lb' + (sched.ub - sched.lb)' .* rand(N_NU, numel(sched.lb));
-
-        % uniform grid over inner REGION_FRAC of each dim
+        % uniform grid over inner frac of each dim
         edges = arrayfun(@(lo,hi) linspace(lo,hi,NG_PER_DIM)', ...
-                         cen - REGION_FRAC*half, cen + REGION_FRAC*half, ...
-                         'UniformOutput', false);
+                         cen - frac*half, cen + frac*half, 'UniformOutput', false);
         [G1,G2,G3,G4] = ndgrid(edges{1}, edges{2}, edges{3}, edges{4});
         devs    = [G1(:), G2(:), G3(:), G4(:)];
         N_DELTA = size(devs, 1);
 
-        % ===== 이전(trim-only) 방식 — 보존: 입력 섭동 없이 트림에서만 잔차 =====
-        % eng = U0(5:13);
-        % srf = [U0(1)-U0(2); U0(1)+U0(2); U0(3); U0(3); U0(4)];
-        % Y = zeros(N_DELTA, 4);
-        % parfor k = 1:N_DELTA
-        %     st  = state0;  st(prow) = trimRef + devs(k,:)';
-        %     fnl = GUAM.state_derivative(st, eng, srf);
-        %     e   = fnl(prow) - Ap * devs(k,:)';   % Bp*u 없음, u=trim 고정
-        %     Y(k,:) = abs(e)';
-        % end
-        % ===== 현재(envelope) 방식 — Y = max_u |f_nl - (Ap*dev + Bp*u)| (bang-bang) =====
-        Y = zeros(N_DELTA, 4);
-        parfor k = 1:N_DELTA
-            st = state0;  st(prow) = trimRef + devs(k,:)';
-            em = zeros(1, 4);
-            for j = 1:N_NU
-                [eng, srf] = actuator_cmd(sched, us(j,:)');
+        if is_lon
+            % ----- trim-only: no input perturbation, residual at u_trim -----
+            eng = U0(5:13);
+            srf = [U0(1)-U0(2); U0(1)+U0(2); U0(3); U0(3); U0(4)];
+            Y = zeros(N_DELTA, 4);
+            parfor k = 1:N_DELTA
+                st  = state0;  st(prow) = trimRef + devs(k,:)';
                 fnl = GUAM.state_derivative(st, eng, srf);
-                e   = fnl(prow) - (Ap * devs(k,:)' + Bp * us(j,:)');
-                em  = max(em, abs(e)');
+                e   = fnl(prow) - Ap * devs(k,:)';
+                Y(k,:) = abs(e)';
             end
-            Y(k,:) = em;
+        else
+            % ----- envelope: Y = max_u |f_nl - (Ap*dev + Bp*u)| over bang-bang box -----
+            sched      = struct('axis', axisName, 'U0', U0);
+            uTrim      = U0(gridInfo.U0_idx);
+            sched.lb   = max(gridInfo.pl, uTrim + gridInfo.Dlo) - uTrim;
+            sched.ub   = min(gridInfo.pu, uTrim + gridInfo.Dhi) - uTrim;
+            us         = sched.lb' + (sched.ub - sched.lb)' .* rand(N_NU, numel(sched.lb));
+            Y = zeros(N_DELTA, 4);
+            parfor k = 1:N_DELTA
+                st = state0;  st(prow) = trimRef + devs(k,:)';
+                em = zeros(1, 4);
+                for j = 1:N_NU
+                    [eng, srf] = actuator_cmd(sched, us(j,:)');
+                    fnl = GUAM.state_derivative(st, eng, srf);
+                    e   = fnl(prow) - (Ap * devs(k,:)' + Bp * us(j,:)');
+                    em  = max(em, abs(e)');
+                end
+                Y(k,:) = em;
+            end
         end
 
         zs   = (devs - cen') ./ half';
         Phi  = design_quad(zs);
-        % ===== 이전 방식 — OLS만 (inflation 없음, 상계 아님) =====
-        % beta = zeros(15, 4);  R2 = zeros(1, 4);
-        % for c = 1:4
-        %     beta(:, c) = Phi \ Y(:, c);
-        %     res = Y(:, c) - Phi * beta(:, c);
-        %     R2(c) = 1 - sum(res.^2) / max(sum((Y(:,c) - mean(Y(:,c))).^2), eps);
-        % end
-        % ===== 현재 — OLS + per-channel inflation scalar 로 상계화 =====
         beta = zeros(15, 4);  R2 = zeros(1, 4);  infl = ones(1, 4);  cover = zeros(1, 4);
         for c = 1:4
             b = Phi \ Y(:, c);
             res  = Y(:, c) - Phi * b;
             R2(c) = 1 - sum(res.^2) / max(sum((Y(:,c) - mean(Y(:,c))).^2), eps);
-            F   = max(Phi * b, 0);                       % OLS shape, clipped >=0
-            sel = F > FIT_FLOOR * max(F);
-            infl(c) = max([1, max(Y(sel, c) ./ F(sel))]);% scalar so s*F >= Y
-            beta(:, c) = infl(c) * b;
+            if is_lon
+                beta(:, c) = b;                              % OLS only (no upper bound)
+            else
+                F   = max(Phi * b, 0);                       % OLS shape, clipped >=0
+                sel = F > FIT_FLOOR * max(F);
+                infl(c) = max([1, max(Y(sel, c) ./ F(sel))]);% scalar so s*F >= Y
+                beta(:, c) = infl(c) * b;
+            end
             cover(c) = 100 * mean(max(Phi * beta(:,c), 0) >= Y(:, c));
         end
         rec = struct('uh', uh, 'beta', beta, 'R2', R2, 'infl', infl, 'cover', cover);
@@ -136,11 +135,11 @@ for ui = 1:nM
 end
 half_lon = ((brt.lon.gmax - brt.lon.gmin) / 2)';
 half_lat = ((brt.lat.gmax - brt.lat.gmin) / 2)';
-feature  = 'phi(z)=[1, z1..z4, z1^2..z4^2, z1z2,z1z3,z1z4,z2z3,z2z4,z3z4], z=dev/half; beta inflated to upper-bound max_u|e|';
+feature  = 'phi(z)=[1, z1..z4, z1^2..z4^2, pairwise], z=dev/half; lon trim-only OLS, lat max_u envelope + inflation';
 save(fullfile(outDir, 'guam_disturbance_quadfit.mat'), ...
      'beta_lon', 'beta_lat', 'half_lon', 'half_lat', 'infl_lon', 'infl_lat', 'UH_LIST', 'feature');
 fprintf('saved -> %s\n', fullfile(outDir, 'guam_disturbance_quadfit.mat'));
-fprintf('  channel order lon [u w q theta], lat [v p r phi];  beta(:,c,uh) = 15x1 (inflated)\n');
+fprintf('  channel order lon [u w q theta], lat [v p r phi];  lon OLS, lat inflated\n');
 
 
 % ===================== helpers ============================================

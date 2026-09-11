@@ -23,3 +23,6 @@ Refactoring/tests/*
 
 # Heavy data files
 reachable_data/
+
+# Mesh file
+visualize/meshes/

@@ -20,6 +20,7 @@ NG       = 25;      % fit-surface grid nodes per axis
 N_S      = 250;     % scatter (actual residual) samples per channel
 N_NU     = 12;      % input samples per deviation
 DT       = 0.01;
+FT2M     = 0.3048;  % ft -> m (SI) for display
 % -------------------------------------------------------------------------
 
 if ~exist(figDir, 'dir'), mkdir(figDir); end
@@ -31,10 +32,12 @@ UH_ALL    = QF.UH_LIST(:)';
 
 axinfo = struct( ...
     'name', {'lon', 'lat'}, ...
-    'slab', {{'\Deltau [ft/s]','\Deltaw [ft/s]','\Deltaq [rad/s]','\Delta\theta [rad]'}, ...
-             {'\Deltav [ft/s]','\Deltap [rad/s]','\Deltar [rad/s]','\Delta\phi [rad]'}}, ...
+    'slab', {{'\Deltau [m/s]','\Deltaw [m/s]','\Deltaq [rad/s]','\Delta\theta [rad]'}, ...
+             {'\Deltav [m/s]','\Deltap [rad/s]','\Deltar [rad/s]','\Delta\phi [rad]'}}, ...
     'clab', {{'dX','dZ','dM'}, {'dY','dL','dN'}}, ...
-    'cunit',{{'ft/s^2','ft/s^2','rad/s^2'}, {'ft/s^2','rad/s^2','rad/s^2'}});
+    'cunit',{{'m/s^2','m/s^2','rad/s^2'}, {'m/s^2','rad/s^2','rad/s^2'}}, ...
+    'sscale',{[FT2M FT2M 1 1], [FT2M 1 1 1]}, ...
+    'cscale',{[FT2M FT2M 1], [FT2M 1 1]});
 
 for iu = 1:numel(UH_ALL)
     UH = UH_ALL(iu);
@@ -62,6 +65,7 @@ for iu = 1:numel(UH_ALL)
             imp = state_importance(beta(:, c));
             [~, ord] = sort(imp, 'descend');
             d1 = ord(1);  d2 = ord(2);
+            sc1 = axinfo(ai).sscale(d1);  sc2 = axinfo(ai).sscale(d2);  scz = axinfo(ai).cscale(c);
 
             % fitted surface over the dominant plane
             g1 = linspace(gi.gmin(d1), gi.gmax(d1), NG);
@@ -88,28 +92,23 @@ for iu = 1:numel(UH_ALL)
             end
 
             nexttile;  hold on;  grid on;  box on;
-            surf(X1, X2, Bfit, 'EdgeColor', 'none', 'FaceAlpha', 0.6);
+            surf(X1 * sc1, X2 * sc2, Bfit * scz, 'EdgeColor', 'none', 'FaceAlpha', 0.6);
             % colour scatter by whether they fall inside the fitting region
             in_fit = abs(s1) <= half_fit(d1) & abs(s2) <= half_fit(d2);
             if any(in_fit)
-                scatter3(s1(in_fit),  s2(in_fit),  yS(in_fit),  9, [0 0 0],        'filled', 'MarkerFaceAlpha', 0.55);
+                scatter3(s1(in_fit) * sc1,  s2(in_fit) * sc2,  yS(in_fit) * scz,  9, [0 0 0],        'filled', 'MarkerFaceAlpha', 0.55);
             end
             if any(~in_fit)
-                scatter3(s1(~in_fit), s2(~in_fit), yS(~in_fit), 9, [0.75 0.1 0.1], 'filled', 'MarkerFaceAlpha', 0.35);
+                scatter3(s1(~in_fit) * sc1, s2(~in_fit) * sc2, yS(~in_fit) * scz, 9, [0.75 0.1 0.1], 'filled', 'MarkerFaceAlpha', 0.35);
             end
             % fitting region boundary (dashed rectangle at z=0)
-            bx = half_fit(d1) * [-1  1  1 -1 -1];
-            by = half_fit(d2) * [-1 -1  1  1 -1];
+            bx = sc1 * half_fit(d1) * [-1  1  1 -1 -1];
+            by = sc2 * half_fit(d2) * [-1 -1  1  1 -1];
             plot3(bx, by, zeros(1,5), 'k--', 'LineWidth', 1.2);
             xlabel(axinfo(ai).slab{d1});  ylabel(axinfo(ai).slab{d2});
             zlabel(sprintf('%s [%s]', axinfo(ai).clab{c}, axinfo(ai).cunit{c}));
-            title(sprintf('%s  over (%s,%s)', axinfo(ai).clab{c}, ...
-                          strtok(axinfo(ai).slab{d1}, ' '), strtok(axinfo(ai).slab{d2}, ' ')));
             view(38, 26);  colormap(parula);
         end
-        title(tl, sprintf(['Model-mismatch disturbance  (%s, UH%d = %.0f ft/s, WH3):  ' ...
-                           'surface = fit,  black = actual (inside fit region),  red = actual (outside),  dashed = fit boundary'], ...
-                           ax, UH, trimTable.UH(UH)));
         exportgraphics(fig, fullfile(figDir, sprintf('resid_%s_dom_UH%02d.png', ax, UH)), ...
                        'Resolution', 150);
         close(fig);
