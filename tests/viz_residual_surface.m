@@ -12,7 +12,7 @@ root = fileparts(here);
 addpath(genpath(root));
 
 % ------------------------------- settings --------------------------------
-stackDir = fullfile(root, 'reachable_data');
+stackDir = fullfile(root, 'reachable_data', 'guam_timestack', 'BRT');
 outDir   = fullfile(root, 'reachable_data', 'mc_verify');
 figDir   = fullfile(outDir, 'resid_surfaces');
 WH_IDX   = 3;
