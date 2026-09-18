@@ -5,13 +5,21 @@ function fig = visualize_tube_overlay_trace(R_or_trace, opts)
     %   opts.tube        : 'brt' or 'frt'
     %   opts.wh_idx      : WH index, default 3
     %   opts.uh_list     : UH index list
-    %   opts.keep_dims   : [1 2], [3 4], or [1 3 4] (schedule slice stack)
+    %   opts.keep_dims   : 2D mode, [dim_a dim_b] into the axis 4-state
+    %   opts.plane_dims  : 3D mode, [dim_a dim_b] plotted in-plane; the third
+    %                      (stacking) axis is the airspeed schedule (body u).
+    %                      Set plane_dims to trigger the 3D schedule stack.
     %   opts.coordMode   : 'absolute' or 'anchor'
     %   opts.shiftByTrim : true/false
     %   opts.figTitle    : custom title
     %
     % Dimension convention (per axis, from FilterConfig.axisSpec):
     %   lon: 1:u 2:w 3:q 4:theta      lat: 1:v 2:p 3:r 4:phi
+    %
+    % 3D schedule stack: for each UH the plane_dims V=0 contour (other dims at
+    % trim) is drawn at that schedule's absolute trim airspeed u, so the corridor
+    % is shown against airspeed across the transition. The trajectory is
+    % (u, plane_a, plane_b).
 
     if nargin < 2 || isempty(opts)
         opts = struct();
@@ -38,14 +46,17 @@ function fig = visualize_tube_overlay_trace(R_or_trace, opts)
         axes_base{d} = linspace(P.grid_min_plot(d), P.grid_max_plot(d), P.grid_num(d));
     end
 
-    keep_dims = opts.keep_dims(:)';
-    if ~(numel(keep_dims) == 2 || numel(keep_dims) == 3)
-        error('opts.keep_dims must have length 2 or 3.');
-    end
-
-    if numel(keep_dims) == 3 && ~isequal(keep_dims, [1 3 4])
-        error(['3D visualization supports only keep_dims = [1 3 4] ', ...
-            '(dim1-dim3-dim4 schedule slice stack).']);
+    is3d = numel(opts.plane_dims) == 2;
+    if is3d
+        plane_dims = opts.plane_dims(:)';
+        if any(plane_dims < 1 | plane_dims > 4) || plane_dims(1) == plane_dims(2)
+            error('opts.plane_dims must be two distinct dims in 1..4.');
+        end
+    else
+        keep_dims = opts.keep_dims(:)';
+        if numel(keep_dims) ~= 2
+            error('2D mode requires opts.keep_dims of length 2 (set plane_dims for 3D).');
+        end
     end
 
     tube = upper(opts.tube);
@@ -61,10 +72,16 @@ function fig = visualize_tube_overlay_trace(R_or_trace, opts)
     valid = all(isfinite(traj4), 2);
 
     traj4_valid = traj4(valid, :);
-    traj = traj4_valid(:, keep_dims);
     k_valid = trace.k(valid);
 
-    extraTrajs = build_extra_trajectories(opts.extraTraces, keep_dims, opts.axis, opts.coordMode, P);
+    if is3d
+        airspeed = trace.uBody(valid) * P.ft2m;   % schedule axis = body u [m/s]
+        traj = [airspeed(:), traj4_valid(:, plane_dims)];
+        extraTrajs = build_extra_trajectories(opts.extraTraces, plane_dims, true, opts.axis, opts.coordMode, P);
+    else
+        traj = traj4_valid(:, keep_dims);
+        extraTrajs = build_extra_trajectories(opts.extraTraces, keep_dims, false, opts.axis, opts.coordMode, P);
+    end
 
     brtExitLocalIdx  = first_marker_index(trace.brtExitFlag, valid);
     gridExitLocalIdx = first_marker_index(trace.gridExitFlag, valid);
@@ -105,12 +122,12 @@ function fig = visualize_tube_overlay_trace(R_or_trace, opts)
             continue;
         end
 
-        [axis_plot, target_lb_plot, target_ub_plot] = ...
+        [axis_plot, target_lb_plot, target_ub_plot, airspeed_plot] = ...
             build_plot_axes_for_schedule( ...
             S, uh_idx, opts.wh_idx, axes_base, ...
             P.target_lb_plot, P.target_ub_plot, P, opts);
 
-        if numel(keep_dims) == 2
+        if ~is3d
             [X, Y, Z] = slice_value_function_2d(data, axes_base, axis_plot, keep_dims);
 
             [~, h_tube] = contour(X, Y, Z, [0 0], ...
@@ -128,20 +145,19 @@ function fig = visualize_tube_overlay_trace(R_or_trace, opts)
             end
 
         else
-            % 3D dim1-dim3-dim4 stack: per-UH dim3-dim4 V=0 contour at local
-            % dim1=dim2=0, placed at that schedule's absolute trim dim1.
-            [d1Plane, d3Plot, d4Plot, Vslice] = ...
-                slice_dims34_at_center( ...
-                data, axes_base, axis_plot);
+            % 3D schedule stack: plane_dims V=0 contour (other dims at trim),
+            % placed at this schedule's absolute trim airspeed u.
+            [aPlot, bPlot, Vslice] = ...
+                slice_plane_at_center(data, axes_base, axis_plot, plane_dims);
 
-            h_tube = draw_zero_contour_on_d1_plane( ...
-                d1Plane, d3Plot, d4Plot, Vslice, ...
+            h_tube = draw_zero_contour_on_u_plane( ...
+                airspeed_plot, aPlot, bPlot, Vslice, ...
                 tubeColor, 0.9);
 
-            h_target = draw_target_rect_on_d1_plane( ...
-                d1Plane, ...
-                target_lb_plot([3 4]), ...
-                target_ub_plot([3 4]), ...
+            h_target = draw_target_rect_on_u_plane( ...
+                airspeed_plot, ...
+                target_lb_plot(plane_dims), ...
+                target_ub_plot(plane_dims), ...
                 'g');
 
             if isempty(h_tube_first) && ~isempty(h_tube)
@@ -157,7 +173,7 @@ function fig = visualize_tube_overlay_trace(R_or_trace, opts)
     % ---------------------------------------------------------------------
     % Overlay trajectory
     % ---------------------------------------------------------------------
-    if numel(keep_dims) == 2
+    if ~is3d
         h_traj = plot(traj(:,1), traj(:,2), 'k-', 'LineWidth', 2.0);
 
         h_extra = gobjects(0);
@@ -192,7 +208,6 @@ function fig = visualize_tube_overlay_trace(R_or_trace, opts)
 
         xlabel(P.labels{keep_dims(1)});
         ylabel(P.labels{keep_dims(2)});
-        axis square;
 
     else
         h_traj = plot3(traj(:,1), traj(:,2), traj(:,3), 'k-', 'LineWidth', 2.0);
@@ -232,9 +247,9 @@ function fig = visualize_tube_overlay_trace(R_or_trace, opts)
                 'mo', 'MarkerFaceColor', 'm', 'MarkerSize', 8);
         end
 
-        xlabel(P.labels{keep_dims(1)});
-        ylabel(P.labels{keep_dims(2)});
-        zlabel(P.labels{keep_dims(3)});
+        xlabel('u (m/s)');   % schedule airspeed
+        ylabel(P.labels{plane_dims(1)});
+        zlabel(P.labels{plane_dims(2)});
 
         view(30, 24);
         axis tight;
@@ -242,7 +257,11 @@ function fig = visualize_tube_overlay_trace(R_or_trace, opts)
     end
 
     if isempty(opts.figTitle)
-        opts.figTitle = make_default_title(opts, P.short_labels, keep_dims);
+        if is3d
+            opts.figTitle = make_default_title_3d(opts, P.short_labels, plane_dims);
+        else
+            opts.figTitle = make_default_title_2d(opts, P.short_labels, keep_dims);
+        end
     end
 
     title(opts.figTitle);
@@ -301,6 +320,7 @@ function opts = fill_overlay_defaults(opts)
     if ~isfield(opts, 'wh_idx'),      opts.wh_idx = 3;                          end
     if ~isfield(opts, 'uh_list'),     opts.uh_list = [];                        end
     if ~isfield(opts, 'keep_dims'),   opts.keep_dims = [1 2];                   end
+    if ~isfield(opts, 'plane_dims'),  opts.plane_dims = [];                     end
     if ~isfield(opts, 'coordMode'),   opts.coordMode = 'absolute';              end
     if ~isfield(opts, 'shiftByTrim'), opts.shiftByTrim = true;                  end
     if ~isfield(opts, 'figTitle'),    opts.figTitle = '';                       end
@@ -367,17 +387,18 @@ function traj4 = build_trace_trajectory(trace, axis, coordMode, P)
     end
 end
 
-function [axis_plot, target_lb_plot, target_ub_plot] = ...
+function [axis_plot, target_lb_plot, target_ub_plot, airspeed_plot] = ...
     build_plot_axes_for_schedule(S, uh_idx, wh_idx, axes_base, ...
     target_lb_base, target_ub_base, P, opts)
+
+    X0 = S.XU0_interp(1:12, uh_idx, wh_idx);
+    airspeed_plot = X0(1) * P.ft2m;   % body-u trim at this schedule [m/s]
 
     axis_plot = axes_base;
     target_lb_plot = target_lb_base;
     target_ub_plot = target_ub_base;
 
     if strcmpi(opts.coordMode, 'absolute') && opts.shiftByTrim
-        X0 = S.XU0_interp(1:12, uh_idx, wh_idx);
-
         trim4 = X0(P.trim_rows) .* P.plot_scale;
 
         for d = 1:4
@@ -417,40 +438,33 @@ function [X, Y, Z] = slice_value_function_2d(data, axes_base, axis_plot, keep_di
     Z = Zraw';
 end
 
-function [d1Plane, d3Plot, d4Plot, Vslice] = ...
-    slice_dims34_at_center(data, axes_base, axis_plot)
+function [aPlot, bPlot, Vslice] = ...
+    slice_plane_at_center(data, axes_base, axis_plot, plane_dims)
+    % V=0 slice over the two plane_dims, with the complement dims held at 0
+    % (trim center). Returns the plot-coordinate axes for the two plane dims.
+    da = plane_dims(1);
+    db = plane_dims(2);
 
-    d3Base = axes_base{3};
-    d4Base = axes_base{4};
+    [A, B] = ndgrid(axes_base{da}, axes_base{db});
 
-    [D3, D4] = ndgrid(d3Base, d4Base);
-
-    D1z = zeros(size(D3));
-    D2z = zeros(size(D3));
+    Q = cell(4, 1);
+    for d = 1:4
+        Q{d} = zeros(size(A));
+    end
+    Q{da} = A;
+    Q{db} = B;
 
     Vslice = interpn( ...
-        axes_base{1}, ...
-        axes_base{2}, ...
-        axes_base{3}, ...
-        axes_base{4}, ...
-        data, ...
-        D1z, D2z, D3, D4, ...
-        'linear');
+        axes_base{1}, axes_base{2}, axes_base{3}, axes_base{4}, ...
+        data, Q{1}, Q{2}, Q{3}, Q{4}, 'linear');
 
-    d3Plot = axis_plot{3};
-    d4Plot = axis_plot{4};
-
-    d1Plane = interp1( ...
-        axes_base{1}, ...
-        axis_plot{1}, ...
-        0, ...
-        'linear', ...
-        'extrap');
+    aPlot = axis_plot{da};
+    bPlot = axis_plot{db};
 end
 
-function hFirst = draw_zero_contour_on_d1_plane( ...
-    d1Plane, d3Axis, d4Axis, Vslice, colorValue, lineWidth)
-% Draw the dim3-dim4 slice V = 0 contour on the dim1 = d1Plane plane.
+function hFirst = draw_zero_contour_on_u_plane( ...
+    uPlane, aAxis, bAxis, Vslice, colorValue, lineWidth)
+% Draw the plane_dims slice V = 0 contour on the airspeed u = uPlane plane.
 
     hFirst = [];
 
@@ -468,7 +482,7 @@ function hFirst = draw_zero_contour_on_d1_plane( ...
     end
 
     % contourc expects Z as length(y)-by-length(x).
-    C = contourc(d3Axis, d4Axis, Vslice', [0 0]);
+    C = contourc(aAxis, bAxis, Vslice', [0 0]);
 
     col = 1;
     while col < size(C, 2)
@@ -482,7 +496,7 @@ function hFirst = draw_zero_contour_on_d1_plane( ...
         points = C(:, col + 1 : col + numPoints);
 
         h = plot3( ...
-            d1Plane * ones(1, numPoints), ...
+            uPlane * ones(1, numPoints), ...
             points(1, :), ...
             points(2, :), ...
             '-', ...
@@ -504,16 +518,16 @@ function h = draw_target_box_2d(lb, ub, colorChar)
     h = plot(x, y, '-', 'Color', colorChar, 'LineWidth', 1.5);
 end
 
-function h = draw_target_rect_on_d1_plane( ...
-    d1Plane, lb_34, ub_34, colorValue)
+function h = draw_target_rect_on_u_plane( ...
+    uPlane, lb_ab, ub_ab, colorValue)
 
-    d3 = [lb_34(1), ub_34(1), ub_34(1), lb_34(1), lb_34(1)];
-    d4 = [lb_34(2), lb_34(2), ub_34(2), ub_34(2), lb_34(2)];
+    a = [lb_ab(1), ub_ab(1), ub_ab(1), lb_ab(1), lb_ab(1)];
+    b = [lb_ab(2), lb_ab(2), ub_ab(2), ub_ab(2), lb_ab(2)];
 
-    d1 = d1Plane * ones(size(d3));
+    u = uPlane * ones(size(a));
 
     h = plot3( ...
-        d1, d3, d4, ...
+        u, a, b, ...
         '-', ...
         'Color', colorValue, ...
         'LineWidth', 1.3);
@@ -539,26 +553,24 @@ function localIdx = first_marker_index(flag, valid)
     localIdx = find(validAbsIdx == absIdx, 1, 'first');
 end
 
-function titleStr = make_default_title(opts, short_labels, keep_dims)
-    if numel(keep_dims) == 2
-        titleStr = sprintf('%s %s overlay: %s vs %s, coord=%s', ...
-            upper(opts.axis), ...
-            upper(opts.tube), ...
-            short_labels{keep_dims(1)}, ...
-            short_labels{keep_dims(2)}, ...
-            opts.coordMode);
-    else
-        titleStr = sprintf('%s %s overlay: %s, %s, %s, coord=%s', ...
-            upper(opts.axis), ...
-            upper(opts.tube), ...
-            short_labels{keep_dims(1)}, ...
-            short_labels{keep_dims(2)}, ...
-            short_labels{keep_dims(3)}, ...
-            opts.coordMode);
-    end
+function titleStr = make_default_title_2d(opts, short_labels, keep_dims)
+    titleStr = sprintf('%s %s overlay: %s vs %s, coord=%s', ...
+        upper(opts.axis), ...
+        upper(opts.tube), ...
+        short_labels{keep_dims(1)}, ...
+        short_labels{keep_dims(2)}, ...
+        opts.coordMode);
 end
 
-function extraTrajs = build_extra_trajectories(extraSpecs, keep_dims, axis, coordMode, P)
+function titleStr = make_default_title_3d(opts, short_labels, plane_dims)
+    titleStr = sprintf('%s %s corridor vs airspeed: u, %s, %s', ...
+        upper(opts.axis), ...
+        upper(opts.tube), ...
+        short_labels{plane_dims(1)}, ...
+        short_labels{plane_dims(2)});
+end
+
+function extraTrajs = build_extra_trajectories(extraSpecs, dims, is3d, axis, coordMode, P)
     extraTrajs = struct([]);
 
     if isempty(extraSpecs)
@@ -581,7 +593,12 @@ function extraTrajs = build_extra_trajectories(extraSpecs, keep_dims, axis, coor
         valid = all(isfinite(traj4), 2);
 
         traj4 = traj4(valid, :);
-        traj = traj4(:, keep_dims);
+        if is3d
+            airspeed = tr.uBody(valid) * P.ft2m;
+            traj = [airspeed(:), traj4(:, dims)];
+        else
+            traj = traj4(:, dims);
+        end
 
         if isempty(traj)
             continue;

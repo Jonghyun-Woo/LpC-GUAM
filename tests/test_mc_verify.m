@@ -11,9 +11,9 @@ root = fileparts(here);
 addpath(genpath(root));
 
 % ------------------------------- settings --------------------------------
-DATASET  = 'GUAM_BRT_run_timestack_0906';
+DATASET  = 'guam_timestack';
 UH_LIST  = [1 4 8 12 16 20];
-WH_IDX   = 3;
+WH_IDX   = 2;
 N_SAMPLE = 100;
 DT       = 0.01;
 SEED     = 20260906;
@@ -22,7 +22,7 @@ FIX.lon = [0; 0; 0; 0];   % [u, w, q, theta] held values (deviation)
 FIX.lat = [0; 0; 0; 0];   % [v, p, r, phi]
 % -------------------------------------------------------------------------
 
-runDir = fullfile(root, 'reachable_data', DATASET);
+runDir = fullfile(root, 'reachable_data', DATASET, 'BRT');
 outDir = fullfile(root, 'reachable_data', 'mc_verify_timestack');
 if ~exist(outDir, 'dir'), mkdir(outDir); end
 
@@ -60,9 +60,9 @@ parfor i_uh = 1:n_uh
         if i_axis == 2, axis_name = 'lat'; end
         gridCfg = axisCfg.(axis_name);
 
-        V_stack = readNPY(fullfile(runDir, sprintf('%s_NPY', upper(axis_name)), ...
-                          sprintf('GUAM_%s_BRT_UH%d_WH%d_stack.npy', ...
-                                  upper(axis_name), uh_idx, WH_IDX)));
+        V_stack = load_stack(fullfile(runDir, sprintf('BRT_%s_MAT', upper(axis_name)), ...
+                             sprintf('GUAM_%s_BRT_UH%d_WH%d_stack.mat', ...
+                                     upper(axis_name), uh_idx, WH_IDX)));
         gridCfg  = add_stack_indexing(gridCfg, size(V_stack));
         dt_slice = T_HORIZON / (gridCfg.n_slice - 1);
 
@@ -117,9 +117,9 @@ parfor i_uh = 1:n_uh
 
             case_rows(end + 1) = struct('case', cases(i_case).name, 'uh', uh_idx, ...
                                         'reach', reach, 't_reach', t_reach, ...
-                                        'left_grid', left_grid); %#ok<AGROW>
+                                        'left_grid', left_grid);
         end
-        V_stack = []; %#ok<NASGU>
+        V_stack = [];
     end
     uh_rows{i_uh} = case_rows;
 end
@@ -142,7 +142,7 @@ save(fullfile(outDir, 'mc_summary.mat'), 'summary', 'DATASET', 'UH_LIST', ...
      'WH_IDX', 'N_SAMPLE', 'DT', 'T_HORIZON', 'FIX', 'SEED');
 fprintf('\nsaved %s\n', fullfile(outDir, 'mc_summary.mat'));
 
-
+%% Local functions
 function [X_hist, U_hist, V_hist, reach, t_reach, left_grid] = ...
          rollout(GUAM, V_stack, gridCfg, sched, x0_dev, dt, n_step, dt_slice)
     state = [0; 0; -100; sched.X0(1:3); sched.X0(10:12); sched.X0(4:6)];
@@ -298,6 +298,13 @@ function gridCfg = add_stack_indexing(gridCfg, stack_size)
     gridCfg.corners = double(dec2bin(0:15) - '0');
 end
 
+function V_stack = load_stack(fname)
+    % Rebuild the 5-D [n_slice, Nu, Nw, Nq, Ntheta] array the rest of the code
+    % indexes into, from the .mat time-stack's 1xK cell of 4-D slices.
+    s       = load(fname, 'Vslices');
+    V_stack = permute(cat(5, s.Vslices{:}), [5 1 2 3 4]);
+end
+
 function yml = read_yml(path)
     lines = regexp(fileread(path), '\r?\n', 'split');
     yml = struct();  section = '';
@@ -317,6 +324,6 @@ function yml = read_yml(path)
     end
 end
 
-function save_result(fname, result) %#ok<INUSD>
+function save_result(fname, result)
     save(fname, '-struct', 'result');
 end

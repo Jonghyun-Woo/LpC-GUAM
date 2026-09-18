@@ -40,7 +40,8 @@ classdef ValueFunction < handle
     methods
         function obj = ValueFunction(axis_spec, tables_dir, uh_breakpoint, wh_breakpoint)
             % axis_spec     : FilterConfig.axisSpec(ax)
-            % tables_dir    : directory scanned for axis_spec.brt_prefix + '_UH%d_WH%d.mat'
+            % tables_dir    : parent dir; the <AXIS>_BRT subfolder is scanned for
+            %                 axis_spec.brt_prefix + '_UH%d_WH%d.mat'
             % uh_breakpoint,
             % wh_breakpoint : UH/WH breakpoint vectors [ft/s] (trim table S.UH, S.WH)
             obj.axis_spec       = axis_spec;
@@ -61,7 +62,8 @@ classdef ValueFunction < handle
             % Resolve tables_dir against cwd first, then the MATLAB path (so a
             % relative 'tables/BRT' works when Refactoring/ is on the path but
             % is not the current folder, matching how RSLQR loads tables).
-            resolved_dir = ValueFunction.resolve_dir(tables_dir);
+            axis_dir     = fullfile(tables_dir, sprintf('%s_BRT', upper(axis_spec.axis)));
+            resolved_dir = ValueFunction.resolve_dir(axis_dir);
             file_pattern = sprintf('%s_UH*_WH*.mat', axis_spec.brt_prefix);
             files        = dir(fullfile(resolved_dir, file_pattern));
             if isempty(files)
@@ -72,7 +74,7 @@ classdef ValueFunction < handle
             name_regex = sprintf('^%s_UH(\\d+)_WH(\\d+)\\.mat$', axis_spec.brt_prefix);
             tables = struct('uh_idx', {}, 'wh_idx', {}, 'value_interp', {}, 'grad_interp', {});
             for f = 1:numel(files)
-                tokens = regexp( (f).name, name_regex, 'tokens', 'once');
+                tokens = regexp(files(f).name, name_regex, 'tokens', 'once');
                 if isempty(tokens)
                     continue;
                 end
@@ -80,10 +82,10 @@ classdef ValueFunction < handle
                 wh_idx = str2double(tokens{2});
 
                 brt_value_table = load(fullfile(resolved_dir, files(f).name));
-                assert(isfield(brt_value_table, 'data'), 'ValueFunction:noData', ...
-                       '%s has no ''data'' field.', files(f).name);
+                assert(isfield(brt_value_table, 'values'), 'ValueFunction:noValues', ...
+                       '%s has no ''values'' field.', files(f).name);
 
-                data = brt_value_table.data;
+                data = double(brt_value_table.values);
                 assert(isequal(size(data), axis_spec.grid_num(:)'), ...
                        'ValueFunction:badSize', ...
                        '%s size %s ~= grid_num %s.', files(f).name, ...

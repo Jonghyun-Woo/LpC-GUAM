@@ -17,10 +17,10 @@ root = fileparts(here);
 addpath(genpath(root));
 
 % ------------------------------- settings --------------------------------
-stackDir    = fullfile(root, 'reachable_data');
+stackDir    = fullfile(root, 'reachable_data', 'guam_timestack', 'BRT');
 outDir      = fullfile(root, 'reachable_data', 'mc_verify');
 UH_LIST     = 1:20;
-WH_IDX      = 3;
+WH_IDX      = 2;
 NG_PER_DIM  = 7;       % uniform grid per dim: 7^4 = 2401 state points
 N_NU        = 24;      % random input samples per deviation (lat bang-bang envelope)
 DT          = 0.01;

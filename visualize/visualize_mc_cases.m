@@ -10,9 +10,9 @@ addpath(genpath(root));
 
 % ------------------------------- settings --------------------------------
 CASE       = 'rphi';   % 'uw' | 'qtheta' (lon) | 'vp' | 'rphi' (lat)
-UH_IDX     = 8;
+UH_IDX     = 12;
 SAMPLE     = 'auto';     % 'auto' picks the last sample to reach the target, or an index
-MESH_TIMES = [0 0.5 1.0 1.5];
+MESH_TIMES = [0 0.3 0.7 1.0];
 MESH_VIEW  = 'tail';     % lat only: 'tail' looks forward, 'front' looks aft
 AXIS_EQUAL = false;      % path plot: true distorts nothing but flattens climb
 % -------------------------------------------------------------------------

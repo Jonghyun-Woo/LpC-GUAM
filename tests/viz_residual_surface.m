@@ -15,7 +15,7 @@ addpath(genpath(root));
 stackDir = fullfile(root, 'reachable_data', 'guam_timestack', 'BRT');
 outDir   = fullfile(root, 'reachable_data', 'mc_verify');
 figDir   = fullfile(outDir, 'resid_surfaces');
-WH_IDX   = 3;
+WH_IDX   = 2;
 NG       = 25;      % fit-surface grid nodes per axis
 N_S      = 250;     % scatter (actual residual) samples per channel
 N_NU     = 12;      % input samples per deviation
@@ -27,7 +27,7 @@ if ~exist(figDir, 'dir'), mkdir(figDir); end
 brt       = brt_setup(read_yml(fullfile(stackDir, 'guam_analysis_config.yml')));
 trimTable = load(fullfile(root, 'controller', 'trim_table_Poly_ConcatVer4p0.mat'));
 GUAM      = LpC_GUAM(Config('althold', struct('dt', DT)));
-QF        = load(fullfile(outDir, 'guam_disturbance_quadfit.mat'));
+QF        = load(fullfile(outDir, 'guam_disturbance_quadfit_WH2.mat'));
 UH_ALL    = QF.UH_LIST(:)';
 
 axinfo = struct( ...

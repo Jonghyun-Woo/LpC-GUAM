@@ -13,8 +13,8 @@ classdef Controller < handle
     properties
         controller_config       % ControllerConfig (hub-owned)
         baseline_controller     % RSLQR (gain-scheduled control + allocation)
-        safety_filter           % LivenessFilter (longitudinal liveness), or [] to bypass
-        safety_filter_wh_anchor % WH anchor [ft/s] for the LON BRT scheduling
+        safety_filter           % LivenessFilter (per-axis liveness), or [] to bypass
+        safety_filter_wh_anchor % WH anchor [ft/s] for the BRT scheduling
     end
 
     methods
@@ -24,14 +24,15 @@ classdef Controller < handle
             obj.controller_config   = config;
             obj.baseline_controller = RSLQR(config, dt);
 
-            % Longitudinal liveness filter (production axis). Loads BRT value
-            % functions from FilterConfig.tables_dir_default; passes through
-            % when tables are absent or (uh,wh) is outside coverage. Its UH/WH
-            % breakpoints come from the baseline controller's trim table.
+            % Liveness filter over filterCfg.axes ({'lon'} or {'lon','lat'}).
+            % Loads BRT value functions from FilterConfig.tables_dir_default;
+            % passes through when tables are absent or (uh,wh) is outside
+            % coverage. UH/WH breakpoints come from the baseline trim table.
             filterCfg = config.filter;
-            obj.safety_filter = LivenessFilter('lon', filterCfg.mode, ...
+            obj.safety_filter = LivenessFilter(filterCfg.axes, filterCfg.mode, ...
                                                FilterConfig.tables_dir_default, ...
-                                               obj.baseline_controller.UH, obj.baseline_controller.WH);
+                                               obj.baseline_controller.UH, obj.baseline_controller.WH, ...
+                                               filterCfg.use_disturbance);
 
             obj.safety_filter_wh_anchor = filterCfg.wh_anchor;
             if isempty(obj.safety_filter_wh_anchor)
@@ -42,13 +43,9 @@ classdef Controller < handle
         function [engine, surface] = control(obj, state, ref)
             % Full closed-loop control. Returns absolute effector commands.
             %
-            % The safety-filter mode selects what runs after the baseline
-            % allocation:
-            %   'off'   -> baseline controller only (no liveness filter)
-            %   'blend' -> CBF-like blending filter after the baseline
-            %   'lr'    -> least-restrictive filter after the baseline
-            % 'blend'/'lr' share the same post-baseline projection; the filter
-            % law itself is realized inside LivenessFilter.filter per its mode.
+            % Safety-filter modes: 'off' -> baseline only; 'blend' -> CBF-like
+            % liveness projection over the filter's active axes (one constraint
+            % per axis, solved jointly over the shared 13-effector input).
             [perturb_cmd, U0] = obj.baseline_controller.control(state, ref);
 
             if isempty(obj.safety_filter)
@@ -57,74 +54,65 @@ classdef Controller < handle
                 mode = lower(obj.safety_filter.mode);
             end
 
-            switch mode
-                case 'off'
-                    % Baseline only: nothing added after the nominal allocation.
-                case {'blend', 'lr'}
-                    [curr_brt_info, next_brt_info] = obj.build_brt_frames(state, U0);
+            if ~strcmp(mode, 'off')
+                % Build current/next anchor frames for each active axis and
+                % project the nominal 13-effector perturbation onto the tube.
+                axes = obj.safety_filter.axes;
+                frames = struct();
+                for i = 1:numel(axes)
+                    ax = axes{i};
+                    [frames.(ax).curr, frames.(ax).next] = obj.build_frames(ax, state);
+                end
 
-                    % Map the nominal 11-effector perturbation into each anchor frame.
-                    u_lon_nom = perturb_cmd(1:11);
-                    curr_brt_info.u_anchor_nom = u_lon_nom + curr_brt_info.dtrim;
-                    next_brt_info.u_anchor_nom = u_lon_nom + next_brt_info.dtrim;
-
-                    [u_anchor_f, info] = obj.safety_filter.filter(curr_brt_info, next_brt_info, state);
-                    perturb_cmd(1:11)  = u_anchor_f - info.target_dtrim;
-                otherwise
-                    error('Controller:mode', ...
-                        'Unknown safety-filter mode "%s" (expected off, blend, or lr).', mode);
+                [u_all_f, info] = obj.safety_filter.filter(frames, perturb_cmd(1:13), U0);
+                perturb_cmd(1:13) = u_all_f - info.target_dtrim;
             end
 
             [engine, surface] = obj.baseline_controller.total_cmd(perturb_cmd, U0);
         end
 
-        function [curr_brt_info, next_brt_info] = build_brt_frames(obj, state, U0)
-            % Build the current/next longitudinal BRT anchor frames the liveness
-            % filter selects between. The anchor UH breakpoints bracket the
-            % current body-x velocity; WH is fixed to safety_filter_wh_anchor.
+        function [curr, next] = build_frames(obj, ax, state)
+            % Current/next BRT anchor frames for axis ax. The anchor UH
+            % breakpoints bracket the current body-x velocity; WH is fixed to
+            % safety_filter_wh_anchor.
             UH = obj.baseline_controller.UH;
-
             uhA = max(UH(1), min(UH(end), state(4)));
             [~, current_id] = min(abs(UH - uhA));
             next_id = min(length(UH), current_id + 1);
 
-            curr_brt_info = obj.make_brt_frame(state, U0, current_id, 'current');
-            next_brt_info = obj.make_brt_frame(state, U0, next_id,    'next');
+            curr = obj.make_frame(ax, state, current_id, [ax '_current']);
+            next = obj.make_frame(ax, state, next_id,    [ax '_next']);
         end
 
-        function info = make_brt_frame(obj, state, U0, uh_id, name)
-            % Assemble one BRT anchor frame at trim-table UH index uh_id and the
-            % fixed WH anchor. u_anchor_nom is filled in by control() once the
-            % nominal allocation is known.
-            bc    = obj.baseline_controller;
-            u_idx = obj.safety_filter.axis_spec.U0_idx;
+        function info = make_frame(obj, ax, state, uh_id, name)
+            % One BRT anchor frame for axis ax at trim-table UH index uh_id and
+            % the fixed WH anchor. The perturbation state and reduced dynamics
+            % are selected per axis from FilterConfig.axisSpec (state_rows /
+            % trim_rows) and the RSLQR LON/LAT reduced model.
+            spec     = FilterConfig.axisSpec(ax);
+            baseline = obj.baseline_controller;
 
-            uhA = bc.UH(uh_id);
+            uhA = baseline.UH(uh_id);
             whA = obj.safety_filter_wh_anchor;
 
-            [X0a, U0a] = bc.interp_xu0(uhA, whA);         % anchor trim state/input
-            Ap_a = bc.interp_mtrx(bc.LON.Ap, uhA, whA);   % linear dynamics at anchor trim
-            Bp_a = bc.interp_mtrx(bc.LON.Bp, uhA, whA);
+            [X0a, U0a] = baseline.interp_xu0(uhA, whA);
+            dyn  = baseline.(upper(ax));                        % LON or LAT reduced model
+            Ap_a = baseline.interp_mtrx(dyn.Ap, uhA, whA);
+            Bp_a = baseline.interp_mtrx(dyn.Bp, uhA, whA);
 
-            % Perturbation state relative to the anchor trim [u; w; q; theta].
-            x_anchor = [state(4)  - X0a(1); ...
-                        state(6)  - X0a(3); ...
-                        state(11) - X0a(5); ...
-                        state(8)  - X0a(11)];
-            dtrim = U0(u_idx) - U0a(u_idx);               % 11x1 effector trim offset
+            x_anchor = state(spec.state_rows) - X0a(spec.trim_rows);
 
             info = struct( ...
-                'uhA',          uhA, ...
-                'whA',          whA, ...
-                'X0a',          X0a, ...
-                'U0a',          U0a, ...
-                'Ap_a',         Ap_a, ...
-                'Bp_a',         Bp_a, ...
-                'x_anchor',     x_anchor, ...
-                'dtrim',        dtrim, ...
-                'u_anchor_nom', [], ...
-                'idx',          uh_id, ...
-                'name',         name);
+                'uhA',      uhA, ...
+                'whA',      whA, ...
+                'X0a',      X0a, ...
+                'U0a',      U0a, ...
+                'Ap_a',     Ap_a, ...
+                'Bp_a',     Bp_a, ...
+                'x_anchor', x_anchor(:), ...
+                'idx',      uh_id, ...
+                'name',     name, ...
+                'axis',     ax);
         end
 
         function [x0, engine0, surface0] = initial_condition(obj, refTraj)

@@ -85,8 +85,8 @@ for ic = 1:numel(CASES)
         ylim(pad([min(pts(2, :)) max(pts(2, :))] * s2, MARGIN));
 
         xlabel(vw.label{d1});  ylabel(vw.label{d2});
-        title(sprintf('UH%d (u_{trim} = %.1f m/s):  %.0f%% reach', ...
-                      S.uh_idx, S.uh_vel * ft2m, 100 * mean(S.reach)));
+        title(sprintf('UH%d (u_{trim} = %.1f m/s)', ...
+                      S.uh_idx, S.uh_vel * ft2m));
 
         rate(end + 1) = struct('case', CASES{ic}, 'uh', S.uh_idx, ...
                                'pct', 100 * mean(S.reach)); %#ok<AGROW>

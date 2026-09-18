@@ -12,7 +12,7 @@ To keep the port tractable it targets the low-speed, short-range eVTOL transitio
 
 - **Frames:** NED Inertial / Body / Aero ($\alpha$, $\beta$)
 - **Default variants only:** Polynomial aero-propulsive model, first-order rate/position limited actuators, 6-DOF rigid-body-dynamics.
-- **Units:** English throughout:  ft, slug, lbf, rad.
+- **Units:** English throughout:  ft, slug, lbf, rad (basic position/velocity plots are shown in meters).
 
 ## Architecture
 

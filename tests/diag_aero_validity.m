@@ -16,7 +16,7 @@ outDir   = fullfile(root, 'reachable_data', 'mc_verify');
 figDir   = fullfile(outDir, 'aero_validity');
 UH_SWEEP = 1:20;        % all trim airspeeds 1-20
 DETAIL   = [1 10 20];   % which UH get the full 6-panel sweep figure
-WH_IDX   = 3;
+WH_IDX   = 2;
 NP       = 241;
 ALT      = 100;     % ft
 % -------------------------------------------------------------------------
@@ -37,7 +37,7 @@ eff = struct( ...
   'unit', {'RPM','RPM','deg','deg','deg','deg'}, ...
   'prim', {3, 1, 3, 4, 5, 6}, ...                                  % design primary: Fz,Fx,Fz,Mx,My,Mz
   'disp', {rpm, rpm, r2d, r2d, r2d, r2d}, ...
-  'dcur', {12.5664, 31.4159, 0.1745, 0.1745, 0.1745, 0.1745}, ...   % current yml Delta (rad/s | rad)
+  'dcur', {10.4720, 31.4159, 0.2618, 0.2618, 0.2618, 0.2618}, ...   % current yml BRT Delta: lift 100 RPM, push 300 RPM, surf 15 deg (rad/s | rad)
   'half', {600/rpm, 800/rpm, 40/r2d, 40/r2d, 40/r2d, 40/r2d}, ...   % sweep half-range
   'plim', {1600/rpm, 2000/rpm, 30/r2d, 30/r2d, 30/r2d, 30/r2d});    % physical limit (abs)
 
@@ -89,9 +89,9 @@ for iu = 1:nU
         end
     end
     if makefig
-        title(tl, sprintf('Aero-validity sweep  (UH%d = %.0f ft/s, WH3):  blue = design-primary,  dashed = current \\Delta,  magenta = aero-DB validity edge (frozen forces past here)', ...
-                          uh, trimTable.UH(uh)));
-        exportgraphics(fig, fullfile(figDir, sprintf('aero_validity_UH%02d.png', uh)), 'Resolution', 150);
+        title(tl, sprintf('Aero-validity sweep  (UH%d = %.0f ft/s, WH%d = %.1f ft/s):  blue = design-primary,  dashed = current \\Delta,  magenta = aero-DB validity edge (frozen forces past here)', ...
+                          uh, trimTable.UH(uh), WH_IDX, trimTable.WH(WH_IDX)));
+        exportgraphics(fig, fullfile(figDir, sprintf('aero_validity_UH%02d_WH%d.png', uh, WH_IDX)), 'Resolution', 150);
         close(fig);  fprintf('\n');
     end
 end
@@ -108,9 +108,22 @@ for ie = 1:nE
     title(eff(ie).name);
     if ie == 1, legend({'lin+','|lin-|','current'}, 'Location','best'); end
 end
-title(tlS, 'Aero-DB validity-valid \Delta vs airspeed (UH1-20, WH3);  gaps = no speed/prop trip (surfaces, or beyond sweep)');
-exportgraphics(figS, fullfile(figDir, 'aero_validity_summary.png'), 'Resolution', 150);
+title(tlS, sprintf('Aero-DB validity-valid \\Delta vs airspeed (UH1-20, WH%d = %.1f ft/s);  gaps = no speed/prop trip (surfaces, or beyond sweep)', WH_IDX, trimTable.WH(WH_IDX)));
+exportgraphics(figS, fullfile(figDir, sprintf('aero_validity_summary_WH%d.png', WH_IDX)), 'Resolution', 150);
 close(figS);
+
+% ---- violation check: |current Delta| beyond aero-DB valid edge, all UH ----
+fprintf('\n=== violations: current Delta beyond aero-DB valid edge (WH%d, w=%.1f ft/s) ===\n', WH_IDX, trimTable.WH(WH_IDX));
+any_viol = false;
+for ie = 1:nE
+    cur = eff(ie).dcur * eff(ie).disp;
+    uv  = UH_SWEEP(cur > Lp(ie,:) | cur > -Ln(ie,:));   % NaN edge (no trip) -> not flagged
+    if ~isempty(uv)
+        any_viol = true;
+        fprintf('  %-9s (cur=%.0f %s): UH %s\n', eff(ie).name, cur, eff(ie).unit, mat2str(uv));
+    end
+end
+if ~any_viol, fprintf('  none -- current Delta within aero-DB valid envelope for all UH.\n'); end
 fprintf('saved sweeps + summary -> %s\n', figDir);
 
 

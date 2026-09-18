@@ -13,8 +13,8 @@ classdef SimLogger < handle
     % and trimmed to the actual count by finalize().
     %
     % Units follow the plant: position ft, velocity ft/s, angles rad, rotor
-    % speed rad/s. exportTrace() emits the fields consumed by the LON tube
-    % overlay helpers (tests/visualize_lon_tube_overlay_trace.m).
+    % speed rad/s. exportTrace() emits the fields consumed by the tube
+    % overlay helpers (logger/visualize_tube_overlay_trace.m).
 
     properties
         cfg         % LoggerConfig
@@ -82,9 +82,9 @@ classdef SimLogger < handle
             x = guam.state;
             obj.buf.state(j, :) = x(:)';
 
-            [a, bta, Vair] = guam.aeroFrame.compute(x(4), x(5), x(6));
-            obj.buf.alpha(j) = a;
-            obj.buf.beta(j)  = bta;
+            [alpha, beta, Vair] = guam.aeroFrame.compute(x(4), x(5), x(6));
+            obj.buf.alpha(j) = alpha;
+            obj.buf.beta(j)  = beta;
             obj.buf.V(j)     = Vair;
 
             obj.buf.ref_pos(j, :) = ref.pos(:)';
@@ -104,24 +104,24 @@ classdef SimLogger < handle
             obj.buf.surface(j, :) = surface(:)';
 
             if ~obj.cfg.logFilter, return; end
-            li = controller.safety_filter.last_info;
-            if isempty(li), return; end
+            filter_info = controller.safety_filter.last_info;
+            if isempty(filter_info), return; end
 
             nu_ = obj.nu;
-            obj.buf.brtV(j)       = getfield_default(li, 'V', NaN);
-            obj.buf.u_nom(j, :)   = row(getfield_default(li, 'u_nom', nan(nu_, 1)), nu_);
-            obj.buf.u0(j, :)      = row(getfield_default(li, 'u0',    nan(nu_, 1)), nu_);
-            obj.buf.u(j, :)       = row(getfield_default(li, 'u',     nan(nu_, 1)), nu_);
-            obj.buf.lb(j, :)      = row(getfield_default(li, 'lb',    nan(nu_, 1)), nu_);
-            obj.buf.ub(j, :)      = row(getfield_default(li, 'ub',    nan(nu_, 1)), nu_);
-            obj.buf.active(j)     = double(getfield_default(li, 'active', NaN));
-            obj.buf.du(j)         = getfield_default(li, 'du', NaN);
-            obj.buf.satClip(j)    = getfield_default(li, 'sat_clip', NaN);
-            obj.buf.cmdChange(j)  = getfield_default(li, 'command_changed', NaN);
-            obj.buf.dVdt(j)       = getfield_default(li, 'dVdt', NaN);
-            obj.buf.rhs(j)        = getfield_default(li, 'rhs', NaN);
-            obj.buf.insideGrid(j) = double(getfield_default(li, 'inside_grid', NaN));
-            obj.buf.ok(j)         = double(getfield_default(li, 'ok', NaN));
+            obj.buf.brtV(j)       = getfield_default(filter_info, 'V', NaN);
+            obj.buf.u_nom(j, :)   = row(getfield_default(filter_info, 'u_nom', nan(nu_, 1)), nu_);
+            obj.buf.u0(j, :)      = row(getfield_default(filter_info, 'u0',    nan(nu_, 1)), nu_);
+            obj.buf.u(j, :)       = row(getfield_default(filter_info, 'u',     nan(nu_, 1)), nu_);
+            obj.buf.lb(j, :)      = row(getfield_default(filter_info, 'lb',    nan(nu_, 1)), nu_);
+            obj.buf.ub(j, :)      = row(getfield_default(filter_info, 'ub',    nan(nu_, 1)), nu_);
+            obj.buf.active(j)     = double(getfield_default(filter_info, 'active', NaN));
+            obj.buf.du(j)         = getfield_default(filter_info, 'du', NaN);
+            obj.buf.satClip(j)    = getfield_default(filter_info, 'sat_clip', NaN);
+            obj.buf.cmdChange(j)  = getfield_default(filter_info, 'command_changed', NaN);
+            obj.buf.dVdt(j)       = getfield_default(filter_info, 'dVdt', NaN);
+            obj.buf.rhs(j)        = getfield_default(filter_info, 'rhs', NaN);
+            obj.buf.insideGrid(j) = double(getfield_default(filter_info, 'inside_grid', NaN));
+            obj.buf.ok(j)         = double(getfield_default(filter_info, 'ok', NaN));
         end
 
         function finalize(obj)
@@ -137,14 +137,19 @@ classdef SimLogger < handle
         end
 
         function tr = exportTrace(obj)
-            % Emit a struct with the fields consumed by the LON tube-overlay
+            % Emit a struct with the fields consumed by the tube-overlay
             % helpers (absolute coord mode) and the input-comparison plot.
+            % Both lon [u,w,q,theta] and lat [v,p,r,phi] states are provided.
             st = obj.buf.state;
             tr = struct();
             tr.uBody    = st(:, 4);
             tr.w        = st(:, 6);
             tr.q        = st(:, 11);
             tr.thetaDeg = rad2deg(st(:, 8));
+            tr.v        = st(:, 5);
+            tr.p        = st(:, 10);
+            tr.r        = st(:, 12);
+            tr.phiDeg   = rad2deg(st(:, 7));
             tr.k        = obj.buf.k;
             tr.brtExitFlag  = double(obj.buf.ok == 1 & obj.buf.brtV > 0);
             tr.gridExitFlag = double(obj.buf.insideGrid == 0);
@@ -181,41 +186,42 @@ classdef SimLogger < handle
         function figs = plotBasic(obj)
             % Position / velocity / attitude / effector figures (ported from
             % the original run_transition_sim.m inline plots; data from buf).
-            t   = obj.buf.t;
-            st  = obj.buf.state;          % N x 12
-            rp  = obj.buf.ref_pos;        % N x 3
-            rv  = obj.buf.ref_vel;        % N x 3
+            t             = obj.buf.t;
+            state_hist    = obj.buf.state;      % N x 12
+            ref_pos_hist  = obj.buf.ref_pos;    % N x 3
+            ref_vel_hist  = obj.buf.ref_vel;    % N x 3
+            ft2m          = 0.3048;             % plant is ft; plot in meters
             figs = struct();
 
             % --- Inertial position (NED) ---
             figs.position = figure('Name', 'Position (NED)');
-            lbl = {'North [ft]', 'East [ft]', 'Down [ft]'};
+            labels = {'North [m]', 'East [m]', 'Down [m]'};
             for i = 1:3
                 subplot(3, 1, i);
-                plot(t, st(:, i), 'b', t, rp(:, i), 'r--');
-                ylabel(lbl{i}); grid on;
+                plot(t, ft2m * state_hist(:, i), 'b', t, ft2m * ref_pos_hist(:, i), 'r--');
+                ylabel(labels{i}); grid on;
                 if i == 1, legend('sim', 'ref'); title('Inertial position'); end
             end
             xlabel('Time [s]');
 
             % --- Body velocity ---
             figs.velocity = figure('Name', 'Body velocity');
-            lbl = {'u [ft/s]', 'v [ft/s]', 'w [ft/s]'};
+            labels = {'u [m/s]', 'v [m/s]', 'w [m/s]'};
             for i = 1:3
                 subplot(3, 1, i);
-                plot(t, st(:, 3 + i), 'b', t, rv(:, i), 'r--');
-                ylabel(lbl{i}); grid on;
+                plot(t, ft2m * state_hist(:, 3 + i), 'b', t, ft2m * ref_vel_hist(:, i), 'r--');
+                ylabel(labels{i}); grid on;
                 if i == 1, legend('sim', 'ref (heading frame)'); title('Velocity'); end
             end
             xlabel('Time [s]');
 
             % --- Attitude ---
             figs.attitude = figure('Name', 'Attitude');
-            lbl = {'\phi [deg]', '\theta [deg]', '\psi [deg]'};
+            labels = {'\phi [deg]', '\theta [deg]', '\psi [deg]'};
             for i = 1:3
                 subplot(3, 1, i);
-                plot(t, rad2deg(st(:, 6 + i)), 'b');
-                ylabel(lbl{i}); grid on;
+                plot(t, rad2deg(state_hist(:, 6 + i)), 'b');
+                ylabel(labels{i}); grid on;
                 if i == 1, title('Euler angles'); end
             end
             xlabel('Time [s]');
@@ -262,17 +268,17 @@ classdef SimLogger < handle
             scale = ones(1, obj.nu);
             scale(10:11) = 180 / pi;
 
-            u_nom = obj.buf.u_nom .* scale;
-            u_f   = obj.buf.u     .* scale;
-            lb    = obj.buf.lb    .* scale;
-            ub    = obj.buf.ub    .* scale;
+            u_nom      = obj.buf.u_nom .* scale;
+            u_filtered = obj.buf.u     .* scale;
+            lb         = obj.buf.lb    .* scale;
+            ub         = obj.buf.ub    .* scale;
 
             figs.input_compare = figure('Name', 'Nominal vs filtered input', 'Color', 'w');
             tiledlayout(4, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
             for i = 1:obj.nu
                 nexttile;
                 plot(k, u_nom(:, i), '--', 'LineWidth', 0.9); hold on;
-                plot(k, u_f(:, i),   '-',  'LineWidth', 1.2);
+                plot(k, u_filtered(:, i), '-', 'LineWidth', 1.2);
                 plot(k, lb(:, i), 'k:', 'LineWidth', 0.7);
                 plot(k, ub(:, i), 'k:', 'LineWidth', 0.7);
                 xlabel('k'); ylabel(sprintf('%s [%s]', inputNames{i}, unitNames{i}));

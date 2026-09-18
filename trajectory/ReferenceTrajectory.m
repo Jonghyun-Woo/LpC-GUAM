@@ -1,56 +1,35 @@
 classdef ReferenceTrajectory
-    % REFERENCETRAJECTORY m-code-only reference trajectory generator.
-    %
-    % Gathers every closed-loop reference scenario in one place. Unlike the
-    % Exec_Scripts/*.m generators (which build 3-point timeseries for Simulink
-    % interpolation), this returns the dense per-step tables that the
-    % Refactoring/ port consumes directly. No Simulink and no lib/ dependency.
-    %
-    % Scenarios (both fly straight north, heading chi = 0):
-    %   'althold' (default) - hover climb to 80 ft, then hold 80 ft in cruise
-    %   'climb'             - hover climb to 80 ft, then climb to 100 ft (original)
-    %
-    % Frame/sign conventions: NED position, Down negative = higher altitude.
-    % vel is expressed in the heading frame; since chi = 0 here it equals the
-    % inertial velocity. A chi ~= 0 scenario would need a QrotZ(chi) transform
-    % of the inertial velocity into the heading frame before returning.
+    % REFERENCETRAJECTORY dense per-step reference tables (no Simulink).
+    % NED position (Down negative = higher altitude); vel is heading-frame,
+    % equal to inertial since chi = 0. All scenarios fly straight north.
+
+    properties (Constant)
+        alt = -200;
+    end
 
     methods (Static)
         function ref = build(scenario, dt, T, target_vel)
-            % BUILD reference trajectory table for a scenario.
-            %   scenario : 'althold' (default) | 'climb'
-            %   dt, T    : time grid parameters (from SimConfig)
-            %   ref      : struct with fields
-            %                time   (1xN)  - time grid [s]
-            %                pos    (3xN)  - NED position [ft]
-            %                vel    (3xN)  - heading-frame velocity [ft/s]
-            %                chi    (1xN)  - heading angle [rad]
-            %                chidot (1xN)  - heading rate [rad/s]
+            % BUILD reference table for a scenario.
+            %   scenario  : 'althold' (default) | 'climb' | 'brt_verify'
+            %   dt, T     : time grid (from SimConfig)
+            %   ref       : struct with time, pos, vel, chi, chidot
             if nargin < 1 || isempty(scenario), scenario = 'althold'; end
 
             time = 0 : dt : T;
             N    = numel(time);
 
-            % Verification-only forward-transition scenario for the LON
-            % liveness filter. Mission = LEVEL forward transition: forward
-            % speed ramps 17 -> 59 ft/s (crossing several UH trim tables so
-            % the filter's UH scheduling is exercised) at CONSTANT altitude.
-            % The test harness starts the vehicle off-trim; the WH3
-            % (descending) BRT is the safety envelope and the filter, anchored
-            % to WH3 (RSLQR safety_wh_anchor), engages only if the transition
-            % would leave that envelope. Used by verify_liveness_lon_realbrt.m.
-            %
-            % Frame rule: vel(3) is the heading/inertial vertical velocity, so
-            % level flight is vel(3) = 0. Do NOT put the body-frame WH here (an
-            % earlier bug integrated WH3 body-w as an inertial descent rate).
-            % The WH3 anchor is pinned by the filter, not encoded here.
-            if strcmp(scenario, 'lon_brt_verify')
+            % Level forward transition: u ramps 0 -> target_vel while body-w
+            % tracks the level-flight trim schedule (vd = -sin(th)*u + cos(th)*w
+            % = 0) to hold `alt`; above the trim grid's w range w saturates.
+            if strcmp(scenario, 'brt_verify')
+                S   = load('trim_table_Poly_ConcatVer4p0.mat');
+                THg = squeeze(S.XU0_interp(11, :, :));   % trim pitch [nUH x nWH]
                 pos = zeros(3, N);
                 vel = zeros(3, N);
-                vel(1, :) = linspace(0, target_vel, N);    % forward speed sweep across UH tables
-                vel(3, :) = 0;                      % level flight (altitude hold)
+                vel(1, :) = linspace(0, target_vel, N);
+                vel(3, :) = ReferenceTrajectory.level_body_w(vel(1, :), S.UH(:), S.WH(:), THg);
                 pos(1, :) = cumtrapz(time, vel(1, :));
-                pos(3, :) = -80 * ones(1, N);      % hold 80 ft up
+                pos(3, :) = ReferenceTrajectory.alt * ones(1, N);
                 ref = struct('time',   time, ...
                              'pos',    pos, ...
                              'vel',    vel, ...
@@ -59,34 +38,25 @@ classdef ReferenceTrajectory
                 return;
             end
 
-            % Split hover (first half, 0..T/2) from cruise (second half).
-            % Time-based split so the segment boundary sits at t = T/2
-            % regardless of grid length. For T = 40, dt = 0.01 this gives
-            % nHover = 2001, nCruise = 2000 (matches the former hardcoded table).
+            % Hover (0..T/2) then cruise, split by time so the boundary is
+            % grid-independent.
             nHover  = nnz(time <= T / 2);
             nCruise = N - nHover;
 
             pos = zeros(3, N);
             vel = zeros(3, N);
 
-            % North: hold during hover, accelerate forward to 150 ft in cruise
             pos(1, :) = [zeros(1, nHover), linspace(0, 150, nCruise)];
             vel(1, :) = [zeros(1, nHover), linspace(0, 15, nCruise)];
 
-            % East: unused (straight north)
-            % (pos(2,:) and vel(2,:) stay zero)
-
-            % Down velocity: climb (w: -8 -> 0) during hover, zero in cruise
             vel(3, :) = [linspace(-8, 0, nHover), zeros(1, nCruise)];
 
-            % Down position: differs only in the cruise segment
+            % Down position differs only in cruise
             switch scenario
                 case 'climb'
-                    % keep climbing 80 -> 100 ft (original, inconsistent with w = 0)
-                    pos(3, :) = [linspace(0, -80, nHover), linspace(-80, -100, nCruise)];
+                    pos(3, :) = [linspace(0, ReferenceTrajectory.alt, nHover), linspace(ReferenceTrajectory.alt, ReferenceTrajectory.alt - 20, nCruise)];
                 case 'althold'
-                    % hold 80 ft through cruise (consistent with w = 0)
-                    pos(3, :) = [linspace(0, -80, nHover), -80 * ones(1, nCruise)];
+                    pos(3, :) = [linspace(0, ReferenceTrajectory.alt, nHover), ReferenceTrajectory.alt * ones(1, nCruise)];
                 otherwise
                     error('ReferenceTrajectory:unknownScenario', ...
                           'Unknown scenario ''%s'' (expected ''althold'' or ''climb'').', ...
@@ -98,6 +68,28 @@ classdef ReferenceTrajectory
                          'vel',    vel, ...
                          'chi',    zeros(1, N), ...
                          'chidot', zeros(1, N));
+        end
+
+        function w = level_body_w(u, UHb, WHb, THg)
+            % Body-w [ft/s] giving level flight (vd = -sin(th)*u + cos(th)*w = 0)
+            % at each forward speed u, from the trim pitch THg on the (UH,WH) grid;
+            % saturates at the grid's body-w limits (level needs more w than the
+            % grid holds at high u, leaving a small residual climb there).
+            uq = linspace(min(u), max(u), 201);
+            wg = linspace(WHb(1), WHb(end), 201);
+            wn = zeros(size(uq));
+            for i = 1:numel(uq)
+                th = interp2(WHb', UHb, THg, wg, uq(i), 'linear');
+                vd = -sin(th) .* uq(i) + cos(th) .* wg;
+                if vd(end) <= 0
+                    wn(i) = wg(end);
+                elseif vd(1) >= 0
+                    wn(i) = wg(1);
+                else
+                    wn(i) = interp1(vd, wg, 0, 'linear');
+                end
+            end
+            w = interp1(uq, wn, u, 'linear');
         end
     end
 end

@@ -6,13 +6,13 @@ classdef Config < handle
     % single Config and hands it to LpC_GUAM(cfg).
     %
     % Layout (2-tier):
-    %   cfg.sim        : SimConfig        (dt, M, T, scenario)
+    %   cfg.sim        : SimConfig        (dt, steps, T, scenario)
     %   cfg.vehicle    : VehicleConfig    (mass/geometry)
     %   cfg.controller : ControllerConfig (target_vel, refTraj, rslqr, filter)
     %   cfg.logger     : LoggerConfig     (logging/plot/save options)
     %
     % overrides (optional struct) fields and destinations:
-    %   .M, .dt          -> SimConfig
+    %   .steps, .dt      -> SimConfig
     %   .target_vel      -> ControllerConfig
     %   scenario (arg)   -> SimConfig (mission profile)
 
@@ -25,7 +25,7 @@ classdef Config < handle
 
     methods
         function obj = Config(scenario, overrides)
-            if nargin < 1 || isempty(scenario), scenario = 'althold'; end
+            if nargin < 1, scenario = ''; end   % '' -> SimConfig default scenario
             if nargin < 2 || isempty(overrides), overrides = struct(); end
 
             % Build order matters: controller depends on sim.dt/T/scenario.
