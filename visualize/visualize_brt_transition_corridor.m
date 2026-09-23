@@ -8,8 +8,8 @@ function visualize_brt_transition_corridor(idx_list)
     root = fileparts(here);
     addpath(here);
 
-    gridCfg = brt_grid_config();
-    if nargin < 1 || isempty(idx_list), idx_list = gridCfg.UH_idx; end
+    grids = struct('lon', axis_grid('lon'), 'lat', axis_grid('lat'));
+    if nargin < 1 || isempty(idx_list), idx_list = 1:20; end
 
     brtRoot = fullfile(root, 'reachable_data', 'guam_timestack', 'BRT');
     outDir  = fullfile(root, 'reachable_data', 'corridor_figures');
@@ -17,7 +17,7 @@ function visualize_brt_transition_corridor(idx_list)
 
     trimData = load(fullfile(root, 'controller', 'trim_table_Poly_ConcatVer4p0.mat'), 'XU0_interp');
     XU0 = trimData.XU0_interp;
-    wh_idx = gridCfg.WH_idx;
+    wh_idx = 2;
     ft2m = 0.3048;
 
     cTube = [0.00 0.45 0.74];
@@ -57,7 +57,7 @@ function visualize_brt_transition_corridor(idx_list)
         for p = 1:n_proj
             fnum = projs{p}{1}; axisName = projs{p}{2}; xdim = projs{p}{3}; ydim = projs{p}{4};
             is2d = projs{p}{8};
-            axCfg = gridCfg.(axisName);
+            axCfg = grids.(axisName);
 
             [xv, yv, Z] = brt_project(V.(axisName), axCfg.gv, xdim, ydim);
             tx = trim(axCfg.trim_rows(xdim));  sx = axCfg.scale(xdim);
@@ -91,12 +91,12 @@ function visualize_brt_transition_corridor(idx_list)
             ylabel('u_{trim} [m/s]', 'FontSize', label_font_size);
             zlabel(projs{p}{6}, 'FontSize', label_font_size);
             view([60, 20]);
-            pbaspect([1, 4, 1]);
+            pbaspect([1, 6, 1]);
         end
         legend_handles = [h_tube(p), h_target(p)];
         legend_labels  = {'BRT boundary', 'target set'};
         shown = isgraphics(legend_handles);
-        legend(legend_handles(shown), legend_labels(shown), 'Location', 'best', 'FontSize', legend_font_size);
+        % legend(legend_handles(shown), legend_labels(shown), 'Location', 'best', 'FontSize', legend_font_size);
         exportgraphics(gcf, fullfile(outDir, [projs{p}{7} '.png']), 'Resolution', 150);
         fprintf('saved %s\n', fullfile(outDir, [projs{p}{7} '.png']));
     end
@@ -119,4 +119,20 @@ function V = load_tube(fname)
     % Full-horizon BRT tube = first (tau=0) slice of the time-stack.
     s = load(fname, 'Vslices');
     V = s.Vslices{1};
+end
+
+function g = axis_grid(ax)
+    % Native grid vectors + plot metadata, all derived from FilterConfig.axisSpec.
+    spec = FilterConfig.axisSpec(ax);
+    ft2m = 0.3048;  r2d = 180 / pi;
+    g.gv        = arrayfun(@(a, b, n) linspace(a, b, n), ...
+                           spec.grid_min, spec.grid_max, spec.grid_num, 'UniformOutput', false);
+    g.trim_rows = spec.trim_rows(:);
+    g.tlb       = -spec.target_ub(:);
+    g.tub       =  spec.target_ub(:);
+    if strcmpi(ax, 'lon')
+        g.scale = [ft2m; ft2m; r2d; r2d];
+    else
+        g.scale = [ft2m; r2d; r2d; r2d];
+    end
 end

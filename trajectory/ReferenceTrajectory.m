@@ -17,19 +17,20 @@ classdef ReferenceTrajectory
 
             time = 0 : dt : T;
             N    = numel(time);
-
-            % Level forward transition: u ramps 0 -> target_vel while body-w
-            % tracks the level-flight trim schedule (vd = -sin(th)*u + cos(th)*w
-            % = 0) to hold `alt`; above the trim grid's w range w saturates.
+            
             if strcmp(scenario, 'brt_verify')
                 S   = load('trim_table_Poly_ConcatVer4p0.mat');
-                THg = squeeze(S.XU0_interp(11, :, :));   % trim pitch [nUH x nWH]
+                THw = squeeze(S.XU0_interp(11, :, 2));       % trim pitch @wh=0 [nUH]
                 pos = zeros(3, N);
                 vel = zeros(3, N);
                 vel(1, :) = linspace(0, target_vel, N);
-                vel(3, :) = ReferenceTrajectory.level_body_w(vel(1, :), S.UH(:), S.WH(:), THg);
-                pos(1, :) = cumtrapz(time, vel(1, :));
-                pos(3, :) = ReferenceTrajectory.alt * ones(1, N);
+                vel(3, :) = 0;                                  % wh = 0 (body w)
+                u_clamp = min(max(vel(1, :), S.UH(1)), S.UH(end));
+                th      = interp1(S.UH(:), THw(:), u_clamp, 'linear');
+                vn      =  cos(th) .* vel(1, :);               % NED-north vel at w=0
+                vd      = -sin(th) .* vel(1, :);               % NED-down  vel at w=0
+                pos(1, :) = cumtrapz(time, vn);
+                pos(3, :) = ReferenceTrajectory.alt + cumtrapz(time, vd);
                 ref = struct('time',   time, ...
                              'pos',    pos, ...
                              'vel',    vel, ...
@@ -68,28 +69,6 @@ classdef ReferenceTrajectory
                          'vel',    vel, ...
                          'chi',    zeros(1, N), ...
                          'chidot', zeros(1, N));
-        end
-
-        function w = level_body_w(u, UHb, WHb, THg)
-            % Body-w [ft/s] giving level flight (vd = -sin(th)*u + cos(th)*w = 0)
-            % at each forward speed u, from the trim pitch THg on the (UH,WH) grid;
-            % saturates at the grid's body-w limits (level needs more w than the
-            % grid holds at high u, leaving a small residual climb there).
-            uq = linspace(min(u), max(u), 201);
-            wg = linspace(WHb(1), WHb(end), 201);
-            wn = zeros(size(uq));
-            for i = 1:numel(uq)
-                th = interp2(WHb', UHb, THg, wg, uq(i), 'linear');
-                vd = -sin(th) .* uq(i) + cos(th) .* wg;
-                if vd(end) <= 0
-                    wn(i) = wg(end);
-                elseif vd(1) >= 0
-                    wn(i) = wg(1);
-                else
-                    wn(i) = interp1(vd, wg, 0, 'linear');
-                end
-            end
-            w = interp1(uq, wn, u, 'linear');
         end
     end
 end

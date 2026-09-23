@@ -8,7 +8,8 @@ classdef FilterConfig < handle
     properties
         % --- Runtime knobs (set on the hub before LpC_GUAM construction) ---
         mode      = 'blend';         % 'blend' | 'off'  (liveness filter mode)
-        wh_anchor = [];              % []=RSLQR defaults to WH(3)
+        wh_anchor = 0;               % BRT scheduling WH anchor [ft/s]; 0 = WH2
+                                     %   (level, wh=0). []=Controller default WH(3)
         axes      = {'lon', 'lat'};  % active filter axes; one liveness constraint per
                                      %   axis, solved as a single QP over the shared
                                      %   13-effector input. {'lon'} = single-axis.
@@ -20,7 +21,7 @@ classdef FilterConfig < handle
 
     properties (Constant)
         % --- Filter parameters (axis-independent) ---
-        gamma    = 5.0;     % smooth-blending CBF rate (paper recommends high gamma; tune post-integ)
+        gamma    = 5.1;     % smooth-blending CBF rate (paper recommends high gamma; tune post-integ)
         eps_band = 1e-3;    % LR boundary band: treat V >= -eps_band as boundary/outside (default-live)
         live_margin = 0.0;  % Conservative live-set margin c >= 0
 
@@ -62,8 +63,10 @@ classdef FilterConfig < handle
             %   axis : 'lon' | 'lat'
             %
             % Fields:
-            %   grid_min, grid_max : 4x1 grid corner (grid_min = -grid_max)
-            %   grid_num           : 4x1 grid node counts N
+            %   grid_min, grid_max : 4x1 grid corner (grid_min = -grid_max).
+            %                        Fallback only: ValueFunction reads the
+            %                        authoritative grid from the BRT .mat files.
+            %   grid_num           : 4x1 grid node counts N (fallback only)
             %   target_ub          : 4x1 target box upper corner (lb = -ub)
             %   brt_prefix         : BRT file-name prefix
             %   nu                 : number of physical effectors (filter dim)
@@ -73,7 +76,7 @@ classdef FilterConfig < handle
             %   trim_rows          : X0 trim-state (12x1) rows giving [x1;x2;x3;x4]
             switch lower(axis)
                 case 'lon'
-                    spec.grid_max   = [16.4042; 21.3255; 0.6109; 0.4363];
+                    spec.grid_max   = [16.4042; 22.9659; 0.6109; 0.4363];
                     spec.grid_num   = [33; 51; 49; 33];
                     spec.target_ub  = [3; 3; 0.10; 0.10];
                     spec.brt_prefix = 'GUAM_LON_BRT';
@@ -84,7 +87,7 @@ classdef FilterConfig < handle
                     spec.state_rows = [4; 6; 11; 8];         % plant state -> [u; w; q; theta]
                     spec.trim_rows  = [1; 3; 5; 11];         % X0 trim state -> [u; w; q; theta]
                 case 'lat'
-                    spec.grid_max   = [16.4042; 1.2217; 0.6109; 0.6981];
+                    spec.grid_max   = [16.4042; 1.5708; 0.6109; 0.7854];
                     spec.grid_num   = [33; 85; 49; 39];
                     spec.target_ub  = [3; 0.10; 0.10; 0.10];
                     spec.brt_prefix = 'GUAM_LAT_BRT';

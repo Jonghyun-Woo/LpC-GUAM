@@ -45,18 +45,8 @@ classdef ValueFunction < handle
             % uh_breakpoint,
             % wh_breakpoint : UH/WH breakpoint vectors [ft/s] (trim table S.UH, S.WH)
             obj.axis_spec       = axis_spec;
-            obj.grid_min        = axis_spec.grid_min(:);
-            obj.grid_max        = axis_spec.grid_max(:);
             obj.uh_breakpoint   = uh_breakpoint(:);
             obj.wh_breakpoint   = wh_breakpoint(:);
-
-            % Grid vectors and per-axis spacing (uniform).
-            obj.grid_vectors    = cell(1, 4);
-            grid_step           = zeros(4, 1);
-            for d = 1:4
-                obj.grid_vectors{d} = linspace(axis_spec.grid_min(d), axis_spec.grid_max(d), axis_spec.grid_num(d));
-                grid_step(d)        = (axis_spec.grid_max(d) - axis_spec.grid_min(d)) / (axis_spec.grid_num(d) - 1);
-            end
 
             % Scan directory for value-function files of this axis.
             % Resolve tables_dir against cwd first, then the MATLAB path (so a
@@ -67,9 +57,20 @@ classdef ValueFunction < handle
             file_pattern = sprintf('%s_UH*_WH*.mat', axis_spec.brt_prefix);
             files        = dir(fullfile(resolved_dir, file_pattern));
             if isempty(files)
+                % No tables: fall back to the axis_spec grid so downstream grid
+                % queries stay well-defined; the filter then passes through.
+                [obj.grid_vectors, obj.grid_min, obj.grid_max] = ...
+                    ValueFunction.grid_from_spec(axis_spec);
                 obj.available = false;
                 return;
             end
+
+            % The reachability grid is read from the BRT .mat files themselves
+            % (single source of truth); each file stores grid_axes / grid_min /
+            % grid_max / grid_N. axis_spec is a fallback only.
+            [obj.grid_vectors, obj.grid_min, obj.grid_max, grid_step] = ...
+                ValueFunction.grid_from_mat(fullfile(resolved_dir, files(1).name), axis_spec);
+            grid_num = cellfun(@numel, obj.grid_vectors);
 
             name_regex = sprintf('^%s_UH(\\d+)_WH(\\d+)\\.mat$', axis_spec.brt_prefix);
             tables = struct('uh_idx', {}, 'wh_idx', {}, 'value_interp', {}, 'grad_interp', {});
@@ -86,10 +87,10 @@ classdef ValueFunction < handle
                        '%s has no ''values'' field.', files(f).name);
 
                 data = double(brt_value_table.values);
-                assert(isequal(size(data), axis_spec.grid_num(:)'), ...
+                assert(isequal(size(data), grid_num(:)'), ...
                        'ValueFunction:badSize', ...
                        '%s size %s ~= grid_num %s.', files(f).name, ...
-                       mat2str(size(data)), mat2str(axis_spec.grid_num(:)'));
+                       mat2str(size(data)), mat2str(grid_num(:)'));
 
                 grad_interp = cell(1, 4);
                 for d = 1:4
@@ -193,6 +194,36 @@ classdef ValueFunction < handle
     end
 
     methods (Static, Access = private)
+        function [gv, gmin, gmax, gstep] = grid_from_mat(matfile, axis_spec)
+            % Read the reachability grid stored in a BRT .mat (single source of
+            % truth). Prefers grid_axes; falls back to grid_min/grid_max/grid_N,
+            % then to axis_spec if the file predates these fields.
+            s = load(matfile);
+            if isfield(s, 'grid_axes')
+                gv = cellfun(@(v) v(:)', s.grid_axes(:)', 'UniformOutput', false);
+            elseif all(isfield(s, {'grid_min', 'grid_max', 'grid_N'}))
+                gv = arrayfun(@(a, b, n) linspace(a, b, n), ...
+                              s.grid_min(:)', s.grid_max(:)', s.grid_N(:)', ...
+                              'UniformOutput', false);
+            else
+                [gv, gmin, gmax, gstep] = ValueFunction.grid_from_spec(axis_spec);
+                return;
+            end
+            gmin  = cellfun(@(v) v(1),   gv)';
+            gmax  = cellfun(@(v) v(end), gv)';
+            gstep = cellfun(@(v) (v(end) - v(1)) / (numel(v) - 1), gv)';
+        end
+
+        function [gv, gmin, gmax, gstep] = grid_from_spec(axis_spec)
+            % Uniform grid from the hardcoded axis_spec (fallback only).
+            gv = arrayfun(@(a, b, n) linspace(a, b, n), ...
+                          axis_spec.grid_min(:)', axis_spec.grid_max(:)', axis_spec.grid_num(:)', ...
+                          'UniformOutput', false);
+            gmin  = axis_spec.grid_min(:);
+            gmax  = axis_spec.grid_max(:);
+            gstep = (axis_spec.grid_max(:) - axis_spec.grid_min(:)) ./ (axis_spec.grid_num(:) - 1);
+        end
+
         function d = resolve_dir(tables_dir)
             % Resolve a possibly-relative directory against cwd, then the
             % MATLAB path. Returns tables_dir unchanged if neither resolves

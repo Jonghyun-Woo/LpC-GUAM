@@ -7,11 +7,11 @@ function visualize_reachable_tube_pair()
     outDir   = fullfile(root, 'reachable_data', 'tube_pair_figures');
     if ~exist(outDir, 'dir'), mkdir(outDir); end
 
-    gridCfg  = brt_grid_config();
+    grids    = struct('lon', axis_grid('lon'), 'lat', axis_grid('lat'));
     trimData = load(fullfile(root, 'controller', 'trim_table_Poly_ConcatVer4p0.mat'), 'XU0_interp');
     XU0      = trimData.XU0_interp;
-    wh_idx   = gridCfg.WH_idx;
-    uh_all   = gridCfg.UH_idx;
+    wh_idx   = 2;
+    uh_all   = 1:20;
 
     col_brt    = [0.00 0.45 0.74];
     col_frt    = [0.85 0.33 0.10];
@@ -45,7 +45,7 @@ function visualize_reachable_tube_pair()
 
         for pj = 1:numel(projs)
             axisName = projs(pj).axis;  xdim = projs(pj).xdim;  ydim = projs(pj).ydim;
-            axCfg    = gridCfg.(axisName);
+            axCfg    = grids.(axisName);
 
             figure; clf; set(gcf, 'Color', 'w'); hold on; grid on; box on;
 
@@ -112,4 +112,20 @@ function h = draw_target_box(axCfg, xdim, ydim, trim, style, color, line_width)
     ylb = (axCfg.tlb(ydim) + ty)*sy;  yub = (axCfg.tub(ydim) + ty)*sy;
     h = plot([xlb xub xub xlb xlb], [ylb ylb yub yub ylb], style, ...
              'Color', color, 'LineWidth', line_width);
+end
+
+function g = axis_grid(ax)
+    % Native grid vectors + plot metadata, all derived from FilterConfig.axisSpec.
+    spec = FilterConfig.axisSpec(ax);
+    ft2m = 0.3048;  r2d = 180 / pi;
+    g.gv        = arrayfun(@(a, b, n) linspace(a, b, n), ...
+                           spec.grid_min, spec.grid_max, spec.grid_num, 'UniformOutput', false);
+    g.trim_rows = spec.trim_rows(:);
+    g.tlb       = -spec.target_ub(:);
+    g.tub       =  spec.target_ub(:);
+    if strcmpi(ax, 'lon')
+        g.scale = [ft2m; ft2m; r2d; r2d];
+    else
+        g.scale = [ft2m; r2d; r2d; r2d];
+    end
 end
