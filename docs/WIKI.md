@@ -398,7 +398,7 @@ The controller integrators, servos, and EOM all use Δt = 0.01 s forward Euler
 
 ### 7.6 Longitudinal Liveness Filter (HJ Reachability)
 
-A liveness filter (`LivenessFilter.m` + `ValueFunctionLUT.m`) runs *behind* the
+A liveness filter (`LivenessFilter.m` + `ValueFunction.m`) runs *behind* the
 nominal RSLQR allocation, projecting the longitudinal effector perturbation
 `act_lon(1:11)` onto a set of liveness-ensuring controls derived from a
 Backward Reachable Tube (BRT) value function `V(x)`. Theory and the full
@@ -418,7 +418,7 @@ design decision log is **ADR-0002**.
 - **UNITS**: everything is ft/s, rad/s, rad. The `*_scale` (m, deg) factors in
   helperOC `visualize_*_tube.m` are **visualization-only** and are NOT applied
   to the value-function grid.
-- **Scheduling / coverage**: `ValueFunctionLUT` auto-parses `(UH,WH)` indices
+- **Scheduling / coverage**: `ValueFunction` auto-parses `(UH,WH)` indices
   from the BRT files present in `tables/BRT/`, interpolates across UH, and
   returns `ok=false` outside coverage (⇒ filter passes through).
 - **WH3-only limitation**: the current LON BRT covers only WH3. Note `UH/WH` are

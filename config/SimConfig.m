@@ -4,16 +4,16 @@ classdef SimConfig < handle
         steps         % Default number of simulation steps
         dt        % Time step (s)
         T         % Total simulation time (s)
-        scenario  % Reference trajectory scenario: 'althold' (default) | 'climb'
-        %   | 'lon_brt_verify' (verification-only descending WH3 scenario)
+        scenario  % Reference trajectory scenario: 'brt_verify' (default) | 'althold'
+        %           | 'climb'  ('brt_verify' = forward transition at wh=0 (w=0, altitude free), WH2 BRT study)
     end
 
     methods
         function obj = SimConfig(scenario, overrides)
-            if nargin < 1 || isempty(scenario), scenario = 'althold'; end
+            if nargin < 1 || isempty(scenario), scenario = 'brt_verify'; end
             if nargin < 2 || isempty(overrides), overrides = struct(); end
             obj.dt       = getfield_default(overrides, 'dt', 0.01);
-            obj.steps    = getfield_default(overrides, 'steps', 4000);
+            obj.steps    = getfield_default(overrides, 'steps', 7000);
             obj.T        = obj.steps * obj.dt;
             obj.scenario = scenario;
         end

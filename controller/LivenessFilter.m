@@ -1,27 +1,24 @@
 classdef LivenessFilter < handle
-    % HJ-reachability liveness filter operating behind a nominal controller.
+    % HJ-reachability liveness filter behind a nominal controller.
     %
-    % Linear-rate only version:
-    %   dV/dt = alpha + beta'*u
-    %   alpha = gradV'*(A*x)
-    %   beta  = (gradV'*B)'
-    %
-    % Blend mode solves the CBF-like projection with MATLAB quadprog:
-    %
-    %   min_u 0.5*||u-u_nom||^2
-    %   s.t.  beta'*u <= -gamma*(V + live_margin) - alpha
-    %         lb <= u <= ub
-    %
-    % Units: ft/s, rad/s, rad.
+    % Each active axis (obj.axes) adds one CBF-like liveness constraint on the
+    % shared 13-effector perturbation u; blend mode projects the nominal command:
+    %   min ||u - u_nom||^2
+    %   s.t. beta_a'*u <= -gamma*(V_a + live_margin) - alpha_a - s_a,  lb<=u<=ub
+    % with alpha_a = gradV_a'*(Ap_a*x_a), beta_a = (gradV_a'*Bp_a)'. s_a is the
+    % optional worst-case model-mismatch term (use_disturbance). Units: ft/s, rad/s, rad.
 
     properties
-        spec
         mode
         gamma
-        eps_band
         live_margin
 
-        lut
+        axes            % active axes, e.g. {'lon'} or {'lon','lat'}
+        value_function  % struct keyed by axis; each carries its .axis_spec
+        combined_spec   % shared 13-effector input spec
+
+        use_disturbance % include the worst-case mismatch term s_a
+        dist            % struct keyed by axis: .beta (15x4xUH), .half (4x1)
 
         n_calls
         n_active
@@ -29,22 +26,59 @@ classdef LivenessFilter < handle
     end
 
     methods
-        function obj = LivenessFilter(channel, mode, tables_dir, uh_bp, wh_bp)
-            obj.spec        = FilterConfig.channelSpec(channel);
+        function obj = LivenessFilter(axes, mode, tables_dir, uh_breakpoint, wh_breakpoint, use_disturbance)
+            if ischar(axes) || isstring(axes), axes = cellstr(axes); end
+            obj.axes        = lower(axes(:))';
             obj.mode        = lower(mode);
             obj.gamma       = FilterConfig.gamma;
-            obj.eps_band    = FilterConfig.eps_band;
             obj.live_margin = FilterConfig.live_margin;
 
             if nargin < 3 || isempty(tables_dir)
                 tables_dir = FilterConfig.tables_dir_default;
             end
+            if nargin < 6 || isempty(use_disturbance), use_disturbance = false; end
 
-            obj.lut = ValueFunctionLUT(obj.spec, tables_dir, uh_bp, wh_bp);
+            obj.value_function = struct();
+            for i = 1:numel(obj.axes)
+                axis = obj.axes{i};
+                obj.value_function.(axis) = ValueFunction(FilterConfig.axisSpec(axis), ...
+                                                          tables_dir, uh_breakpoint, wh_breakpoint);
+            end
+            obj.combined_spec = FilterConfig.combinedSpec();
+
+            obj.use_disturbance = logical(use_disturbance);
+            obj.dist = struct();
+            if obj.use_disturbance
+                obj.load_disturbance();
+            end
 
             obj.n_calls  = 0;
             obj.n_active = 0;
             obj.last_info = [];
+        end
+
+        function load_disturbance(obj)
+            % Load the per-axis model-mismatch envelope (quadratic fit). Disables
+            % the term (with a warning) if the file or an axis' fit is missing.
+            qf_path = FilterConfig.disturbance_quadfit_default;
+            if ~isfile(qf_path)
+                warning('LivenessFilter:disturbance', ...
+                    'Disturbance quadfit "%s" not found; using nominal filter.', qf_path);
+                obj.use_disturbance = false;
+                return;
+            end
+            qf = load(qf_path);
+            for i = 1:numel(obj.axes)
+                axis = obj.axes{i};
+                if ~isfield(qf, ['beta_' axis]) || ~isfield(qf, ['half_' axis])
+                    warning('LivenessFilter:disturbance', ...
+                        'Quadfit missing "%s" axis; using nominal filter.', axis);
+                    obj.use_disturbance = false;
+                    return;
+                end
+                obj.dist.(axis).beta = qf.(['beta_' axis]);      % 15 x 4 x UH
+                obj.dist.(axis).half = qf.(['half_' axis])(:);   % 4 x 1
+            end
         end
 
         function reset_counters(obj)
@@ -52,239 +86,181 @@ classdef LivenessFilter < handle
             obj.n_active = 0;
         end
 
-        function [u, info] = filter(obj, current_brt_info, next_brt_info, x_full) %#ok<INUSD>
-            % info_struct.uhA  : BRT table scheduling variables
-            % info_struct.whA  : BRT table scheduling variables
-            % info_struct.X0a  : 12x1 trim state for input-bound computation
-            % info_struct.U0a  : 13x1 trim input for input-bound computation
-            % info_struct.Ap_a : linear reduced dynamics matrices
-            % info_struct.Bp_a : linear reduced dynamics matrices
-            % info_struct.x_anchor : : 4x1 perturbation state
-            % info_struct.dtrim : trim perturbation from mission frame (Nominal Controller)
-            % info_struct.u_anchor_nom : nu x1 nominal effector perturbation
-            % info_struct.idx : BRT index
-            
+        function [u, info] = filter(obj, frames, u_all_nom, U0)
+            % frames    : struct keyed by axis; .curr / .next BRT anchor frames.
+            % u_all_nom : 13x1 nominal effector perturbation (mission frame).
+            % U0        : 13x1 mission trim input.
+            % Returns the projected 13x1 u (anchor frame); caller maps back with
+            % u - info.target_dtrim.
             obj.n_calls = obj.n_calls + 1;
+            input_spec  = obj.combined_spec;
+            active_axes = obj.axes;
+            num_axes    = numel(active_axes);
 
-            % Trim evaluation
-            c = obj.eval_brt_candidate(current_brt_info, 'current');
-            n = obj.eval_brt_candidate(next_brt_info, 'next');
-            
-            % Target Trim selection (Next 기준으로 수행)
-            transition_ready = n.valid && n.V < 0;
+            % Evaluate curr/next anchor candidates. UH scheduling is
+            % axis-independent, so the curr-vs-next decision is shared.
+            curr_by_axis = struct();
+            next_by_axis = struct();
+            same_anchor      = true;
+            transition_ready = true;
+            for i = 1:num_axes
+                axis     = active_axes{i};
+                value_fn = obj.value_function.(axis);
+                curr = obj.evaluate_anchor(frames.(axis).curr, value_fn, [axis '_current']);
+                next = obj.evaluate_anchor(frames.(axis).next, value_fn, [axis '_next']);
+                curr_by_axis.(axis) = curr;
+                next_by_axis.(axis) = next;
+                same_anchor      = same_anchor      && (curr.idx == next.idx);
+                transition_ready = transition_ready && (next.valid && next.V < 0);
+            end
+            use_next = same_anchor || transition_ready;
 
-            if c.idx == n.idx
-                target = n;
-            elseif transition_ready
-                target = n;
-            else
-                target = c;
+            target = struct();
+            all_valid  = true;
+            all_inside = true;
+            for i = 1:num_axes
+                axis = active_axes{i};
+                if use_next, target.(axis) = next_by_axis.(axis); else, target.(axis) = curr_by_axis.(axis); end
+                all_valid  = all_valid  && target.(axis).valid;
+                all_inside = all_inside && target.(axis).inside_grid;
             end
 
-            x     = target.x_anchor(:);
-            uh    = target.uhA;
-            wh    = target.whA;
-            U0    = target.U0a;
-            A     = target.Ap_a;
-            B     = target.Bp_a;
-            u_nom = target.u_anchor_nom(:);
-            dtrim = target.dtrim(:);
+            % Shared anchor trim (identical across axes at this anchor).
+            U0a          = target.(active_axes{1}).U0a;
+            trim_offset  = U0(input_spec.U0_idx) - U0a(input_spec.U0_idx);
+            u_nom        = u_all_nom(:) + trim_offset;
+            [lb, ub]     = LivenessFilter.input_bounds(U0a, input_spec);
+            u0           = min(max(u_nom, lb), ub);
 
-            % Input bounds are computed early
-            [lb, ub] = LivenessFilter.input_bounds(U0, obj.spec);
-            u0 = min(max(u_nom, lb), ub);
-            
-            % Initialization info struct
+            V_all = struct();
+            for i = 1:num_axes, V_all.(active_axes{i}) = target.(active_axes{i}).V; end
+
             info = struct( ...
-                'target_dtrim', dtrim, ...
-                'active', false, ...
-                'mode', obj.mode, ...
-                'ok', false, ...
-                'inside_grid', target.inside_grid, ...
-                'V', NaN, ...
-                'dVdt', NaN, ...
-                'rhs', NaN, ...
-                'u_nom', u_nom, ...
-                'u0', u0, ...
-                'u', u_nom, ...
-                'du', 0, ...
-                'sat_clip', norm(u0 - u_nom), ...
-                'command_changed', 0, ...
-                'solver', 'none', ...
-                'quadprog_exitflag', NaN ...
-            );
+                'target_dtrim', trim_offset, 'active', false, 'mode', obj.mode, ...
+                'ok', false, 'inside_grid', all_inside, ...
+                'V', target.(active_axes{1}).V, 'V_all', V_all, 'dVdt', NaN, 'rhs', NaN, ...
+                'dist', 0, 'dist_all', struct(), ...
+                'u_nom', u_nom, 'u0', u0, 'u', u_nom, 'du', 0, ...
+                'sat_clip', norm(u0 - u_nom), 'command_changed', 0, ...
+                'solver', 'none', 'quadprog_exitflag', NaN, 'lb', lb, 'ub', ub);
 
-            % Diagnostic-only: expose the per-effector perturbation bounds so
-            % downstream logging/plots can draw them. Does not affect control.
-            info.lb = lb;
-            info.ub = ub;
-
-            % ---------------------------------------------------------------------
-            % OFF mode: preserve nominal input in the selected frame.
-            % ---------------------------------------------------------------------
             if strcmp(obj.mode, 'off')
-                u = u_nom;
-                info.u = u;
-                info.command_changed = norm(u - u_nom);
-                obj.last_info = info;
-                return;
+                u = u_nom; info.u = u; obj.last_info = info; return;
+            end
+            if ~strcmp(obj.mode, 'blend')
+                error('LivenessFilter:mode', ...
+                    'Liveness filter supports only ''blend'' or ''off'' (got "%s").', obj.mode);
             end
 
-            % ---------------------------------------------------------------------
-            % Invalid selected BRT frame.
-            % No formal BRT/CBF guarantee. Use box-clipped fallback.
-            % ---------------------------------------------------------------------
-            if ~target.inside_grid
+            % No guarantee unless every active axis is valid and in-grid.
+            if ~all_valid
                 u = u0;
-                info.solver = 'outside-grid-box-clipped';
-                info.u = u;
-                info.du = norm(u - u0);
-                info.command_changed = norm(u - u_nom);
-                obj.last_info = info;
-                return;
+                info.solver = 'no-coverage-box-clipped';
+                info.u = u; info.du = norm(u - u0); info.command_changed = norm(u - u_nom);
+                obj.last_info = info; return;
             end
-
-            if ~target.ok
-                u = u0;
-                info.solver = 'no-table-coverage-box-clipped';
-                info.u = u;
-                info.du = norm(u - u0);
-                info.command_changed = norm(u - u_nom);
-                obj.last_info = info;
-                return;
-            end
-            
-            % ---------------------------------------------------------------------
-            % Valid selected BRT frame.
-            % --------------------------------------------------------------------- 
-            V     = target.V;
-            gradV = target.gradV(:);
-
-            info.V  = V;
             info.ok = true;
-            info.inside_grid = true;
 
-            alpha = gradV(:)' * (A * x);
-            beta  = (gradV(:)' * B)';
+            % One liveness constraint per axis, over the shared input.
+            Aineq     = zeros(num_axes, input_spec.nu);
+            bineq     = zeros(num_axes, 1);
+            alpha_vec = zeros(num_axes, 1);
+            dist_vec  = zeros(num_axes, 1);
+            for i = 1:num_axes
+                axis = active_axes{i};
+                tgt  = target.(axis);
+                Bp_shared = zeros(size(tgt.Ap_a, 1), input_spec.nu);
+                Bp_shared(:, input_spec.cols.(axis)) = tgt.Bp_a;
+                alpha_vec(i) = tgt.gradV(:)' * (tgt.Ap_a * tgt.x_anchor(:));
+                Aineq(i, :)  = (tgt.gradV(:)' * Bp_shared);
+                if obj.use_disturbance
+                    dbar = obj.disturbance_bound(axis, tgt.x_anchor, tgt.idx);
+                    dist_vec(i) = abs(tgt.gradV(:))' * dbar;
+                end
+                bineq(i)     = -obj.gamma * (tgt.V + obj.live_margin) - alpha_vec(i) - dist_vec(i);
+            end
+            info.rhs = -obj.gamma * (target.(active_axes{1}).V + obj.live_margin);
+            dist_all = struct();
+            for i = 1:num_axes, dist_all.(active_axes{i}) = dist_vec(i); end
+            info.dist     = dist_vec(1);
+            info.dist_all = dist_all;
 
-            info.alpha     = alpha;
-            info.beta_norm = norm(beta);
-
-            switch lower(obj.mode)
-                case 'lr'
-                    % Linear least-restrictive style backup.
-                    if V < -(obj.live_margin + obj.eps_band)
-                        u = u0;
-                        info.active = false;
-                        info.solver = 'lr-inactive';
-                    else
-                        u = LivenessFilter.minimize_linear_over_box(beta, lb, ub);
-                        info.active = true;
-                        info.solver = 'lr-bangbang';
-                    end
-
-                    info.rhs = 0;
-                    info.dVdt = alpha + beta' * u;
-
-                case 'blend'
-                    % CBF-like smooth blending filter.
-                    rhs = -obj.gamma * (V + obj.live_margin);
-                    b   = rhs - alpha;
-
-                    info.rhs = rhs;
-                    info.b   = b;
-
-                    info.dV0 = alpha + beta' * u0;
-                    info.dV_lin_nom = info.dV0;
-
-                    u_min_rate = LivenessFilter.minimize_linear_over_box(beta, lb, ub);
-                    info.dV_lin_min = alpha + beta' * u_min_rate;
-                    info.feasible = (info.dV_lin_min <= rhs + 1e-9);
-
-                    % If box-clipped nominal already satisfies the constraint,
-                    % do not count this as active QP intervention.
-                    if beta' * u0 <= b + 1e-10
-                        u = u0;
-                        info.active = false;
-                        info.solver = 'inactive-clipped-nominal';
-                    else
-                        [u, exitflag] = LivenessFilter.solve_blend_quadprog(u_nom, beta, b, lb, ub);
-
-                        info.active = true;
-                        info.solver = 'quadprog';
-                        info.quadprog_exitflag = exitflag;
-
-                        if isempty(u) || exitflag <= 0
-                            u = u_min_rate;
-                            info.solver = 'quadprog-failed-minrate-backup';
-                            info.feasible = false;
-                        end
-                    end
-
-                    info.dVdt = alpha + beta' * u;
-
-                otherwise
-                    error('LivenessFilter:mode', ...
-                        'Unknown mode "%s" (expected off, lr, or blend).', obj.mode);
+            if all(Aineq * u0 <= bineq + 1e-10)
+                u = u0;
+                info.active = false;
+                info.solver = 'inactive-clipped-nominal';
+            else
+                [u, exitflag] = LivenessFilter.solve_blend_qp(u_nom, Aineq, bineq, lb, ub);
+                % [u, exitflag] = LivenessFilter.solve_blend_qp(u_nom, Aineq, bineq);
+                info.active = true;
+                info.solver = 'quadprog';
+                info.quadprog_exitflag = exitflag;
+                if isempty(u) || exitflag <= 0
+                    u = u0;
+                    info.active = false;
+                    info.solver = 'quadprog-failed-box-clipped';
+                end
             end
 
-            if info.active
-                obj.n_active = obj.n_active + 1;
-            end
-
+            dVdt_all = struct();
+            for i = 1:num_axes, dVdt_all.(active_axes{i}) = alpha_vec(i) + Aineq(i, :) * u; end
+            info.dVdt     = dVdt_all.(active_axes{1});
+            info.dVdt_all = dVdt_all;
+            if info.active, obj.n_active = obj.n_active + 1; end
             info.du = norm(u - u0);
             info.command_changed = norm(u - u_nom);
             info.u = u;
-
             obj.last_info = info;
         end
 
-        function cand = eval_brt_candidate(obj, brt_info, name)
-            x = brt_info.x_anchor(:);
+        function candidate = evaluate_anchor(~, frame, value_fn, name)
+            % Evaluate one BRT anchor frame: V, gradV and coverage flags.
+            x = frame.x_anchor(:);
+            inside_grid = all(x >= value_fn.grid_min(:) - 1e-12) && ...
+                          all(x <= value_fn.grid_max(:) + 1e-12);
 
-            inside_grid = all(x >= obj.spec.grid_min(:) - 1e-12) && ...
-                          all(x <= obj.spec.grid_max(:) + 1e-12);
-
-            [V, gradV, ok] = obj.lut.query(x, brt_info.uhA, brt_info.whA);
-
+            [V, gradV, ok] = value_fn.query(x, frame.uhA, frame.whA);
             if isempty(gradV) || numel(gradV) ~= 4
                 gradV = NaN(4, 1);
             end
 
-            cand = brt_info;
-            cand.name = name;
-            cand.x_anchor = x;
-            cand.V = V;
-            cand.gradV = gradV(:);
-            cand.ok = ok;
-            cand.inside_grid = inside_grid;
-            cand.valid = ok && inside_grid && isfinite(V);
+            candidate = frame;
+            candidate.name = name;
+            candidate.x_anchor = x;
+            candidate.V = V;
+            candidate.gradV = gradV(:);
+            candidate.ok = ok;
+            candidate.inside_grid = inside_grid;
+            candidate.valid = ok && inside_grid && isfinite(V);
         end
 
-        function s = strip_candidate(~, cand)
-            % Lightweight diagnostic copy for last_info.
-            s = struct();
-            s.name = cand.name;
-            s.idx = cand.idx;
-            s.uhA = cand.uhA;
-            s.whA = cand.whA;
-            s.V = cand.V;
-            s.ok = cand.ok;
-            s.inside_grid = cand.inside_grid;
-            s.valid = cand.valid;
-            s.x_anchor = cand.x_anchor;
+        function dbar = disturbance_bound(obj, axis, x, idx)
+            % Per-channel worst-case mismatch magnitude (4x1) from the quadratic
+            % envelope at UH index idx. Zeros outside the fit coverage.
+            d = obj.dist.(axis);
+            if idx < 1 || idx > size(d.beta, 3)
+                dbar = zeros(4, 1);
+                return;
+            end
+            z    = x(:) ./ d.half;                       % normalized deviation
+            phi  = LivenessFilter.design_quad(z(:)');    % 1 x 15
+            dbar = max((phi * d.beta(:, :, idx))', 0);   % 4 x 1
         end
     end
 
     methods (Static)
-        function [lb, ub] = input_bounds(U0, spec)
-            % Per-effector perturbation bounds:
-            %
-            %   lb_i = max(phys_lb_i, trim_i - Delta_i) - trim_i
-            %   ub_i = min(phys_ub_i, trim_i + Delta_i) - trim_i
-            %
-            % trim inputs are picked from RSLQR U0 by spec.U0_idx.
+        function Phi = design_quad(Z)
+            % Quadratic feature row(s): [1, z1..z4, z1^2..z4^2, pairwise] (15 terms).
+            % Must match tests/diag_model_residual.m.
+            z1 = Z(:,1); z2 = Z(:,2); z3 = Z(:,3); z4 = Z(:,4); o = ones(size(z1));
+            Phi = [o, z1, z2, z3, z4, z1.^2, z2.^2, z3.^2, z4.^2, ...
+                   z1.*z2, z1.*z3, z1.*z4, z2.*z3, z2.*z4, z3.*z4];
+        end
 
+        function [lb, ub] = input_bounds(U0, spec)
+            % Per-effector perturbation bounds about the trim (from spec.U0_idx):
+            %   lb_i = max(phys_lb, trim_i - Delta) - trim_i
+            %   ub_i = min(phys_ub, trim_i + Delta) - trim_i
             trim = U0(spec.U0_idx);
             trim = trim(:);
 
@@ -321,30 +297,15 @@ classdef LivenessFilter < handle
             end
         end
 
-        function [u, exitflag] = solve_blend_quadprog(u_nom, beta, b, lb, ub)
-            % Solve:
-            %
-            %   min_u 0.5*||u-u_nom||^2
-            %   s.t.  beta'*u <= b
-            %         lb <= u <= ub
-            %
-            % quadprog form:
-            %
-            %   min 0.5*u'*H*u + f'*u
-
+        function [u, exitflag] = solve_blend_qp(u_nom, Aineq, bineq, lb, ub)
+            % min 0.5*||u-u_nom||^2  s.t.  Aineq*u <= bineq,  lb <= u <= ub
             u_nom = u_nom(:);
-            beta  = beta(:);
             lb    = lb(:);
             ub    = ub(:);
-
-            nu = numel(u_nom);
+            nu    = numel(u_nom);
 
             H = eye(nu);
-            H = 0.5 * (H + H');
             f = -u_nom;
-
-            Aineq = beta(:)';
-            bineq = b;
 
             opts = optimoptions('quadprog', ...
                                 'Display', 'off', ...
@@ -355,21 +316,6 @@ classdef LivenessFilter < handle
                                 'MaxIterations', 200);
 
             [u, ~, exitflag] = quadprog(H, f, Aineq, bineq, [], [], lb, ub, [], opts);
-        end
-
-        function u = minimize_linear_over_box(a, lb, ub)
-            % Solve:
-            %
-            %   min a'*u
-            %   s.t. lb <= u <= ub
-            %
-            % Componentwise solution.
-
-            a  = a(:);
-            lb = lb(:);
-            ub = ub(:);
-
-            u = (a >= 0) .* lb + (a < 0) .* ub;
         end
     end
 end

@@ -10,7 +10,7 @@ classdef ControllerConfig < handle
     % inputs for the reference trajectory (not stored as properties).
 
     properties
-        target_vel = 15;   % cruise forward speed [ft/s] (mission parameter)
+        target_vel = 150;  % cruise forward speed [ft/s] (mission parameter)
         refTraj            % built reference trajectory table
         rslqr              % RSLQRConfig (gains/limits)
         filter             % FilterConfig (liveness filter config)

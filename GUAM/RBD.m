@@ -75,7 +75,7 @@ classdef RBD < handle
             % Form: w_dot = inv(I) * (M - cross(w, I*w))
             % Using mldivide (\) for numerical stability and speed
             cross_w_Iw = cross(omega, obj.I * omega);
-            omega_dot = obj.I \ (M - cross_w_Iw);
+            omega_dot = obj.invI * (M - cross_w_Iw);
             
             % 6. Assemble Output
             dx = [p_dot; v_dot; euler_dot; omega_dot];
