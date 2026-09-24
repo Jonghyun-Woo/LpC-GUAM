@@ -1,6 +1,6 @@
 function visualize_brt_timestack_evolution()
 % Draw how the longitudinal/lateral BRT shrinks over the finite horizon, using
-% the time-stacked value functions in reachable_data/guam_timestack/BRT. One
+% the time-stacked value functions in reachability_data/guam_timestack/BRT. One
 % square figure per requested time slice; axis limits are held fixed across the
 % slices (sized to the largest, i.e. longest-horizon, tube) so the temporal
 % shrinkage is visible directly. Coordinates are deviation-from-trim in display
@@ -10,8 +10,8 @@ function visualize_brt_timestack_evolution()
     root = fileparts(here);
     addpath(here);
 
-    dataRoot = fullfile(root, 'reachable_data', 'guam_timestack', 'BRT');
-    outDir   = fullfile(root, 'reachable_data', 'brt_timestack_evolution');
+    dataRoot = fullfile(root, 'reachability_data', 'guam_timestack', 'BRT');
+    outDir   = fullfile(root, 'reachability_data', 'brt_timestack_evolution');
     if ~exist(outDir, 'dir'), mkdir(outDir); end
 
     uh = 5;  wh = 2;

@@ -156,7 +156,7 @@ classdef SimLogger < handle
 
         function data = exportData(obj)
             % Full logged buffer plus dt/nu, for the visualization layer
-            % (visualize/plot_sim_diagnostics.m). Contains every field the basic
+            % (visualize/visualize_simulation.m). Contains every field the basic
             % and filter diagnostic plots need.
             data    = obj.buf;
             data.dt = obj.dt;

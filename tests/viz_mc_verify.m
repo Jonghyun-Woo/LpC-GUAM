@@ -1,7 +1,7 @@
 % Visualizes the Monte-Carlo reach test written by tests/test_mc_verify.m.
 % Per case: trajectories projected onto the two sampled states, one tile per UH,
 % truncated at first target entry, framed on the BRT tube boundary.
-% Figures go to reachable_data/mc_verify_timestack/figures/.
+% Figures go to reachability_data/mc_verify_timestack/figures/.
 
 clear; close all; clc;
 
@@ -10,7 +10,7 @@ root = fileparts(here);
 addpath(genpath(root));
 
 % ------------------------------- settings --------------------------------
-dataDir = fullfile(root, 'reachable_data', 'mc_verify_timestack');
+dataDir = fullfile(root, 'reachability_data', 'mc_verify_timestack');
 figDir  = fullfile(dataDir, 'figures');
 CASES   = {'uw', 'qtheta', 'vp', 'rphi'};
 MARGIN  = 0.08;

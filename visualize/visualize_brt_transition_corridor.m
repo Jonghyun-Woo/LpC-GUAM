@@ -11,8 +11,8 @@ function visualize_brt_transition_corridor(idx_list)
     grids = struct('lon', axis_grid('lon'), 'lat', axis_grid('lat'));
     if nargin < 1 || isempty(idx_list), idx_list = 1:20; end
 
-    brtRoot = fullfile(root, 'reachable_data', 'guam_timestack', 'BRT');
-    outDir  = fullfile(root, 'reachable_data', 'corridor_figures');
+    brtRoot = fullfile(root, 'reachability_data', 'guam_timestack', 'BRT');
+    outDir  = fullfile(root, 'reachability_data', 'corridor_figures');
     if ~exist(outDir, 'dir'), mkdir(outDir); end
 
     trimData = load(fullfile(root, 'controller', 'trim_table_Poly_ConcatVer4p0.mat'), 'XU0_interp');
