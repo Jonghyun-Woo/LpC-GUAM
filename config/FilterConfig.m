@@ -20,7 +20,7 @@ classdef FilterConfig < handle
 
     properties (Constant)
         % --- Filter parameters (axis-independent) ---
-        gamma    = 5.1;     % smooth-blending CBF rate (paper recommends high gamma; tune post-integ)
+        gamma    = 3.5;     % smooth-blending CBF rate (paper recommends high gamma; tune post-integ)
         eps_band = 1e-3;    % LR boundary band: treat V >= -eps_band as boundary/outside (default-live)
         live_margin = 0.0;  % Conservative live-set margin c >= 0
 

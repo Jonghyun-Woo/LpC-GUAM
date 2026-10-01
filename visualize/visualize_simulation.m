@@ -122,30 +122,55 @@ function figs = plot_basic(data, data_off)
 end
 
 function figs = plot_filter(data, figs)
-    k = data.k;
-    brtV = data.brtV;
-    if all(isnan(brtV)), return; end
+    % One V(t) line per active axis (lon, lat), from the per-axis V logged in
+    % V_all; red shading marks where any axis violates (V>0). Falls back to the
+    % legacy single series for results saved before per-axis V was logged.
+    series = { 'lon', brt_series(data, 'brtVlon'), [0 0.45 0.85]
+               'lat', brt_series(data, 'brtVlat'), [0.85 0.33 0.1] };
+    have = cellfun(@(v) ~all(isnan(v)), series(:, 2));
+    if any(have)
+        series = series(have, :);
+    elseif ~all(isnan(data.brtV))
+        series = {'lon', data.brtV, [0 0.45 0.85]};
+    else
+        return;
+    end
+
     line_width = 1.2;
     ylim_gap = 0.02;
-    fig_size = [1000, 630]; 
+    fig_size = [1000, 630];
+    t = data.dt .* data.k;
 
-    t = data.dt .* k;
     figs.brt_value = figure('Name', 'BRT value', 'Color', 'w'); figs.brt_value.Position(3:4) = fig_size;
     hold on; grid on;
     yline(0, '--', 'V=0');
     yl = ylim;
     h_viol = patch(nan, nan, [1 0 0], 'FaceAlpha', 0.15, 'EdgeColor', 'none');
     h_actv = patch(nan, nan, [0 0.6 0], 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-    
-    shade_intervals(t, data.active == 1, [0 0.6 0], 0.15, yl);
-    shade_intervals(t, brtV > 0, [1 0 0], 0.5, yl);
-    h_line = plot(t, brtV, 'LineWidth', line_width);
 
-    legend([h_line, h_viol, h_actv], {'V(t)', 'V>0 (violation)', 'filter active'}, 'Location', 'northwest');
-    ylim([min(brtV) - ylim_gap, max(brtV) + ylim_gap]);
+    shade_intervals(t, data.active == 1, [0 0.6 0], 0.15, yl);
+    viol = false(size(t));
+    for i = 1:size(series, 1), viol = viol | (series{i, 2} > 0); end
+    shade_intervals(t, viol, [1 0 0], 0.5, yl);
+
+    allV = [];
+    h_line = gobjects(size(series, 1), 1);
+    names  = cell(size(series, 1), 1);
+    for i = 1:size(series, 1)
+        h_line(i) = plot(t, series{i, 2}, 'LineWidth', line_width, 'Color', series{i, 3});
+        names{i}  = sprintf('V_{%s}(t)', series{i, 1});
+        allV = [allV; series{i, 2}(:)];
+    end
+
+    legend([h_line; h_viol; h_actv], [names; {'V>0 (violation)'; 'filter active'}], 'Location', 'northwest');
+    ylim([min(allV) - ylim_gap, max(allV) + ylim_gap]);
     xlabel('Time [s]');
     ylabel('V');
     title('BRT value V(t)');
+end
+
+function v = brt_series(data, name)
+    if isfield(data, name), v = data.(name); else, v = nan(size(data.k)); end
 end
 
 function figs = plot_brt_envelope(data, figs)

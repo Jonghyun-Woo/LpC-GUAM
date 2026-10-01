@@ -92,9 +92,9 @@ function fig = visualize_tube_timeslices(trace, opts)
 
     handles = [handles, h_state, h_start, h_end];
     names   = [names, {'sampled state', 'start', 'end'}];
-    legend(handles, names, 'Location', 'southeast');
+    legend(handles, names, 'Location', 'southeast', 'FontSize', 11);
 
-    exportgraphics(gcf, sprintf('reachability_data/tube_timeslices_%s_%s_%s.png', ...
+    exportgraphics(gcf, sprintf('visualize/figures/tube_timeslices_%s_%s_%s.png', ...
         axU, P.short{dim_x}, P.short{dim_y}), 'Resolution', 150);
 end
 
@@ -107,7 +107,7 @@ function opts = fill_defaults(opts)
     opts.wh_idx     = 2;
     opts.uh_list    = 1:20;
     opts.tube       = 'brt';
-    opts.stack      = false;
+    opts.stack      = true;
 end
 
 function P = axis_plot_config(ax)

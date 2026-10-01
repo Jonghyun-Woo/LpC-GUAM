@@ -40,6 +40,8 @@ classdef SimLogger < handle
             b.ref_vel = nan(N_, 3);
             % --- filter / BRT ---
             b.brtV       = nan(N_, 1);
+            b.brtVlon    = nan(N_, 1);
+            b.brtVlat    = nan(N_, 1);
             b.u_nom      = nan(N_, nu_);
             b.u0         = nan(N_, nu_);
             b.u          = nan(N_, nu_);
@@ -96,6 +98,9 @@ classdef SimLogger < handle
 
             nu_ = obj.nu;
             obj.buf.brtV(j)       = getfield_default(filter_info, 'V', NaN);
+            V_all = getfield_default(filter_info, 'V_all', struct());
+            obj.buf.brtVlon(j)    = getfield_default(V_all, 'lon', NaN);
+            obj.buf.brtVlat(j)    = getfield_default(V_all, 'lat', NaN);
             obj.buf.u_nom(j, :)   = row(getfield_default(filter_info, 'u_nom', nan(nu_, 1)), nu_);
             obj.buf.u0(j, :)      = row(getfield_default(filter_info, 'u0',    nan(nu_, 1)), nu_);
             obj.buf.u(j, :)       = row(getfield_default(filter_info, 'u',     nan(nu_, 1)), nu_);
