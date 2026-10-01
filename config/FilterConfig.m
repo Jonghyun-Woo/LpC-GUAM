@@ -1,6 +1,5 @@
 classdef FilterConfig < handle
-    % Configuration constants and per-axis spec for the longitudinal
-    % (and, for verification only, lateral) HJ-reachability liveness filter.
+    % Configuration constants and per-axis spec for HJ-reachability liveness filter.
     %
     % handle class: runtime knobs (mode/wh_anchor) set on the hub
     % (cfg.controller.filter) are shared by reference with the consumers.
@@ -21,7 +20,7 @@ classdef FilterConfig < handle
 
     properties (Constant)
         % --- Filter parameters (axis-independent) ---
-        gamma    = 5.1;     % smooth-blending CBF rate (paper recommends high gamma; tune post-integ)
+        gamma    = 3.5;     % smooth-blending CBF rate (paper recommends high gamma; tune post-integ)
         eps_band = 1e-3;    % LR boundary band: treat V >= -eps_band as boundary/outside (default-live)
         live_margin = 0.0;  % Conservative live-set margin c >= 0
 
@@ -37,12 +36,12 @@ classdef FilterConfig < handle
 
         % Parent directory holding per-axis BRT value-function subfolders
         % (<AXIS>_BRT), each with converged GUAM_<AXIS>_BRT_UH*_WH*.mat files.
-        tables_dir_default = 'reachable_data/guam_output';
+        tables_dir_default = 'reachability_data/guam_output';
 
         % State-dependent model-mismatch disturbance envelope (quadratic fit),
         % as used in the BRT generation. Fields: beta_<axis> (15x4xUH),
         % half_<axis> (1x4), UH_LIST. See tests/diag_model_residual.m.
-        disturbance_quadfit_default = 'reachable_data/mc_verify/guam_disturbance_quadfit.mat';
+        disturbance_quadfit_default = 'reachability_data/guam_output/guam_disturbance_quadfit.mat';
     end
 
     methods

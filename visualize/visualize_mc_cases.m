@@ -17,7 +17,7 @@ MESH_VIEW  = 'tail';     % lat only: 'tail' looks forward, 'front' looks aft
 AXIS_EQUAL = false;      % path plot: true distorts nothing but flattens climb
 % -------------------------------------------------------------------------
 
-dataDir = fullfile(root, 'reachable_data', 'mc_verify_timestack');
+dataDir = fullfile(root, 'reachability_data', 'mc_verify_timestack');
 figDir  = fullfile(dataDir, 'figures');
 if ~exist(figDir, 'dir'), mkdir(figDir); end
 

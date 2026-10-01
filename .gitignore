@@ -22,7 +22,8 @@ docs/refs
 Refactoring/tests/*
 
 # Heavy data files
-reachable_data/
+reachability_data/
 
-# Mesh file
+# visualize output files
 visualize/meshes/
+visualize/figures/

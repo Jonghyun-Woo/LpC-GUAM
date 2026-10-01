@@ -4,7 +4,7 @@
 % valid envelope; where its slope reverses (control reversal) or blows up, the
 % aero database has left its valid range -- the practical cap on the control
 % perturbation Delta. Marks the current yml Delta and the physical limit.
-% Figures per UH under reachable_data/mc_verify/aero_validity/.
+% Figures per UH under reachability_data/mc_verify/aero_validity/.
 
 clear; clc;
 here = fileparts(mfilename('fullpath'));
@@ -12,7 +12,7 @@ root = fileparts(here);
 addpath(genpath(root));
 
 % ------------------------------- settings --------------------------------
-outDir   = fullfile(root, 'reachable_data', 'mc_verify');
+outDir   = fullfile(root, 'reachability_data', 'mc_verify');
 figDir   = fullfile(outDir, 'aero_validity');
 UH_SWEEP = 1:20;        % all trim airspeeds 1-20
 DETAIL   = [1 10 20];   % which UH get the full 6-panel sweep figure

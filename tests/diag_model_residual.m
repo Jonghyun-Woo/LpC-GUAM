@@ -17,8 +17,8 @@ root = fileparts(here);
 addpath(genpath(root));
 
 % ------------------------------- settings --------------------------------
-stackDir    = fullfile(root, 'reachable_data', 'guam_timestack', 'BRT');
-outDir      = fullfile(root, 'reachable_data', 'mc_verify');
+stackDir    = fullfile(root, 'reachability_data', 'guam_timestack', 'BRT');
+outDir      = fullfile(root, 'reachability_data', 'mc_verify');
 UH_LIST     = 1:20;
 WH_IDX      = 2;
 NG_PER_DIM  = 7;       % uniform grid per dim: 7^4 = 2401 state points

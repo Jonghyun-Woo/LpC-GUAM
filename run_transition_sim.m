@@ -1,10 +1,10 @@
 % run_transition_sim - run the closed-loop transition sim (filter ON/OFF) and
 % save the results to a .mat. No plotting; visualize separately from the file:
-%   plot_sim_diagnostics | visualize_tube_overlay_trace | visualize_tube_timeslices
+%   visualize_simulation | visualize_tube_overlay_trace | visualize_tube_timeslices
 clear all; close all;
 here = fileparts(mfilename('fullpath'));
 addpath(genpath(here));
-results_mat = fullfile(here, 'reachable_data', 'transition_results.mat');
+results_mat = fullfile(here, 'reachability_data', 'transition_results.mat');
 
 modes   = {'blend', 'off'};
 loggers = struct();
@@ -15,9 +15,9 @@ end
 cfg = configs.blend;
 
 results = struct('dt', cfg.sim.dt, ...
-    'meta', struct('scenario', cfg.sim.scenario, ...
-                   'target_vel', cfg.controller.target_vel, ...
-                   'steps', cfg.sim.steps));
+                 'meta', struct('scenario', cfg.sim.scenario, ...
+                 'target_vel', cfg.controller.target_vel, ...
+                 'steps', cfg.sim.steps));
 for i = 1:numel(modes)
     m = modes{i};
     results.(m).trace = loggers.(m).exportTrace();
@@ -40,6 +40,8 @@ fprintf('max |traj deviation|  : u %.3g m/s | w %.3g m/s | q %.3g deg/s | theta 
     ft2m*max(abs(blend.w        - off.w)), ...
     rad2deg(max(abs(blend.q     - off.q))), ...
     max(abs(blend.thetaDeg      - off.thetaDeg)));
+
+visualize_simulation();
 
 %% -------------------------------------------------------------------------
 function [logger, cfg] = run_once(overrides)

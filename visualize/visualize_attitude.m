@@ -9,11 +9,11 @@ root = fileparts(here);
 addpath(genpath(root));
 
 % ------------------------------- settings --------------------------------
-MC_FILE    = fullfile(root, 'reachable_data', 'mc_verify_timestack', 'mc_rphi_UH12.mat');
+MC_FILE    = fullfile(root, 'reachability_data', 'mc_verify_timestack', 'mc_rphi_UH12.mat');
 SAMPLE     = 76;     % 'auto' picks the largest attitude excursion, or an index
 FRAME_STEP = 3;          % rollout steps per animation frame
 FPS        = 20;
-GIF_PATH   = fullfile(root, 'reachable_data', 'mc_verify_timestack', 'figures', ...
+GIF_PATH   = fullfile(root, 'reachability_data', 'mc_verify_timestack', 'figures', ...
                       'attitude_rphi_UH12.gif');
 % -------------------------------------------------------------------------
 

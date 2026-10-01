@@ -3,8 +3,8 @@ function visualize_reachable_tube_pair()
     root = fileparts(here);
     addpath(here);
 
-    dataRoot = fullfile(root, 'reachable_data', 'guam_output');
-    outDir   = fullfile(root, 'reachable_data', 'tube_pair_figures');
+    dataRoot = fullfile(root, 'reachability_data', 'guam_output');
+    outDir   = fullfile(root, 'reachability_data', 'tube_pair_figures');
     if ~exist(outDir, 'dir'), mkdir(outDir); end
 
     grids    = struct('lon', axis_grid('lon'), 'lat', axis_grid('lat'));

@@ -4,7 +4,7 @@
 %   colored surface = fitted e_max_c(z) = phi(dev/half)*beta   (the fit)
 %   black scatter   = actual max_u|e_c(dev,u)| at sampled deviations on the plane
 % lon channels: dX=e_u, dZ=e_w, dM=e_q ;  lat: dY=e_v, dL=e_p, dN=e_r.
-% Figures saved per UH/axis under reachable_data/mc_verify/resid_surfaces/.
+% Figures saved per UH/axis under reachability_data/mc_verify/resid_surfaces/.
 
 clear; clc;
 here = fileparts(mfilename('fullpath'));
@@ -12,8 +12,8 @@ root = fileparts(here);
 addpath(genpath(root));
 
 % ------------------------------- settings --------------------------------
-stackDir = fullfile(root, 'reachable_data', 'guam_timestack', 'BRT');
-outDir   = fullfile(root, 'reachable_data', 'mc_verify');
+stackDir = fullfile(root, 'reachability_data', 'guam_timestack', 'BRT');
+outDir   = fullfile(root, 'reachability_data', 'mc_verify');
 figDir   = fullfile(outDir, 'resid_surfaces');
 WH_IDX   = 2;
 NG       = 25;      % fit-surface grid nodes per axis

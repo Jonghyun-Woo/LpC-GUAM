@@ -22,8 +22,8 @@ FIX.lon = [0; 0; 0; 0];   % [u, w, q, theta] held values (deviation)
 FIX.lat = [0; 0; 0; 0];   % [v, p, r, phi]
 % -------------------------------------------------------------------------
 
-runDir = fullfile(root, 'reachable_data', DATASET, 'BRT');
-outDir = fullfile(root, 'reachable_data', 'mc_verify_timestack');
+runDir = fullfile(root, 'reachability_data', DATASET, 'BRT');
+outDir = fullfile(root, 'reachability_data', 'mc_verify_timestack');
 if ~exist(outDir, 'dir'), mkdir(outDir); end
 
 yml       = read_yml(fullfile(runDir, 'guam_analysis_config.yml'));

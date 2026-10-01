@@ -25,7 +25,7 @@ function fig = visualize_tube_overlay_trace(trace, opts)
     S      = load('trim_table_Poly_ConcatVer4p0.mat');
     axU    = upper(opts.axis);
     tube   = upper(opts.tube);
-    prefix = sprintf('reachable_data/guam_output/%s_%s/GUAM_%s_%s', axU, tube, axU, tube);
+    prefix = sprintf('reachability_data/guam_output/%s_%s/GUAM_%s_%s', axU, tube, axU, tube);
     tube_color = 'b';  if strcmp(tube, 'FRT'), tube_color = 'r'; end
 
     st      = trace_states_native(trace, opts.axis);
@@ -121,7 +121,7 @@ function fig = visualize_tube_overlay_trace(trace, opts)
             else
                 dims = sprintf('%s_%s', P.short{dim_x}, P.short{dim_y});
             end
-            outName = sprintf('reachable_data/tube_overlay_trace_%s_%s_%s.png', axU, tube, dims);
+            outName = sprintf('reachability_data/tube_overlay_trace_%s_%s_%s.png', axU, tube, dims);
         end
         exportgraphics(fig, outName, 'Resolution', 150);
         fprintf('saved %s\n', outName);

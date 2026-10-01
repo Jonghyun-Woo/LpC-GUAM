@@ -25,7 +25,7 @@ function fig = visualize_tube_timeslices(trace, opts)
     S      = load('trim_table_Poly_ConcatVer4p0.mat');
     axU    = upper(opts.axis);
     tube   = upper(opts.tube);
-    prefix = sprintf('reachable_data/guam_output/%s_%s/GUAM_%s_%s', axU, tube, axU, tube);
+    prefix = sprintf('reachability_data/guam_output/%s_%s/GUAM_%s_%s', axU, tube, axU, tube);
 
     state_native = trace_states_native(trace, opts.axis);   % N x 4, native units
     valid        = all(isfinite(state_native), 2);
@@ -92,9 +92,9 @@ function fig = visualize_tube_timeslices(trace, opts)
 
     handles = [handles, h_state, h_start, h_end];
     names   = [names, {'sampled state', 'start', 'end'}];
-    legend(handles, names, 'Location', 'southeast');
+    legend(handles, names, 'Location', 'southeast', 'FontSize', 11);
 
-    exportgraphics(gcf, sprintf('reachable_data/tube_timeslices_%s_%s_%s.png', ...
+    exportgraphics(gcf, sprintf('visualize/figures/tube_timeslices_%s_%s_%s.png', ...
         axU, P.short{dim_x}, P.short{dim_y}), 'Resolution', 150);
 end
 
@@ -107,7 +107,7 @@ function opts = fill_defaults(opts)
     opts.wh_idx     = 2;
     opts.uh_list    = 1:20;
     opts.tube       = 'brt';
-    opts.stack      = false;
+    opts.stack      = true;
 end
 
 function P = axis_plot_config(ax)
