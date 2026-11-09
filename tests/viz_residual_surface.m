@@ -24,7 +24,10 @@ FT2M     = 0.3048;  % ft -> m (SI) for display
 % -------------------------------------------------------------------------
 
 if ~exist(figDir, 'dir'), mkdir(figDir); end
-brt       = brt_setup(read_yml(fullfile(stackDir, 'guam_analysis_config.yml')));
+gridFile  = @(axis_name) fullfile(stackDir, sprintf('BRT_%s_MAT', upper(axis_name)), ...
+                sprintf('GUAM_%s_BRT_UH1_WH%d_stack.mat', upper(axis_name), WH_IDX));
+brt       = struct('lon', brt_axis_config('lon', gridFile('lon')), ...
+                   'lat', brt_axis_config('lat', gridFile('lat')));
 trimTable = load(fullfile(root, 'controller', 'trim_table_Poly_ConcatVer4p0.mat'));
 GUAM      = LpC_GUAM(Config('althold', struct('dt', DT)));
 QF        = load(fullfile(outDir, 'guam_disturbance_quadfit_WH2.mat'));
@@ -49,10 +52,8 @@ for iu = 1:numel(UH_ALL)
         sched.Ap = trimTable.(sprintf('Ap_%s_interp', ax))(:, :, UH, WH_IDX);
         sched.Bp = trimTable.(sprintf('Bp_%s_interp', ax))(:, :, UH, WH_IDX);
         sched.axis = ax;
-        uTrim = sched.U0(gi.U0_idx);
-        sched.lb = max(gi.pl, uTrim + gi.Dlo) - uTrim;
-        sched.ub = min(gi.pu, uTrim + gi.Dhi) - uTrim;
-        prow = gi.prow;  half = (gi.gmax - gi.gmin) / 2;
+        [sched.lb, sched.ub] = LivenessFilter.input_bounds(sched.U0, gi);
+        prow = gi.state_rows;  half = (gi.grid_max - gi.grid_min) / 2;
         half_fit = half;   % OLS fitted with z=dev/half (full grid half)
         state0 = [0; 0; -100; sched.X0(1:3); sched.X0(10:12); sched.X0(4:6)];
         trimRef = state0(prow);
@@ -68,15 +69,15 @@ for iu = 1:numel(UH_ALL)
             sc1 = axinfo(ai).sscale(d1);  sc2 = axinfo(ai).sscale(d2);  scz = axinfo(ai).cscale(c);
 
             % fitted surface over the dominant plane
-            g1 = linspace(gi.gmin(d1), gi.gmax(d1), NG);
-            g2 = linspace(gi.gmin(d2), gi.gmax(d2), NG);
+            g1 = linspace(gi.grid_min(d1), gi.grid_max(d1), NG);
+            g2 = linspace(gi.grid_min(d2), gi.grid_max(d2), NG);
             [X1, X2] = ndgrid(g1, g2);
             Zf = zeros(NG*NG, 4);  Zf(:, d1) = X1(:) / half_fit(d1);  Zf(:, d2) = X2(:) / half_fit(d2);
             Bfit = max(0, reshape(design_quad(Zf) * beta(:, c), NG, NG));
 
             % actual residual scatter on the same plane
-            s1 = gi.gmin(d1) + (gi.gmax(d1) - gi.gmin(d1)) * rand(N_S, 1);
-            s2 = gi.gmin(d2) + (gi.gmax(d2) - gi.gmin(d2)) * rand(N_S, 1);
+            s1 = gi.grid_min(d1) + (gi.grid_max(d1) - gi.grid_min(d1)) * rand(N_S, 1);
+            s2 = gi.grid_min(d2) + (gi.grid_max(d2) - gi.grid_min(d2)) * rand(N_S, 1);
             yS = zeros(N_S, 1);
             parfor s = 1:N_S
                 dev = zeros(4, 1);  dev(d1) = s1(s);  dev(d2) = s2(s);
@@ -146,49 +147,4 @@ function [eng, srf] = actuator_cmd(sched, u)
         ele  = U0(3);          rud = U0(4) + u(10);
     end
     srf = [flap - ail; flap + ail; ele; ele; rud];
-end
-
-function brt = brt_setup(yml)
-    dyn = yml.dynamics;
-    lon = yml.longitudinal;
-    brt.lon = axis_setup(lon, {'u', 'w', 'q', 'theta'});
-    brt.lon.U0_idx = [5:12, 13, 3, 1];
-    brt.lon.prow   = [4; 6; 11; 8];
-    brt.lon.Dlo = [repmat(lon.input_min_Pi, 8, 1); lon.input_min_Pi_p; lon.input_min_delta_e; lon.input_min_delta_f];
-    brt.lon.Dhi = [repmat(lon.input_max_Pi, 8, 1); lon.input_max_Pi_p; lon.input_max_delta_e; lon.input_max_delta_f];
-    brt.lon.pl  = [repmat(dyn.input_min_Pi, 8, 1); dyn.input_min_Pi_p; dyn.input_min_delta_e; dyn.input_min_delta_f];
-    brt.lon.pu  = [repmat(dyn.input_max_Pi, 8, 1); dyn.input_max_Pi_p; dyn.input_max_delta_e; dyn.input_max_delta_f];
-    lat = yml.lateral;
-    brt.lat = axis_setup(lat, {'v', 'p', 'r', 'phi'});
-    brt.lat.U0_idx = [5:12, 2, 4];
-    brt.lat.prow   = [5; 10; 12; 7];
-    brt.lat.Dlo = [repmat(lat.input_min_Pi, 8, 1); lat.input_min_delta_a; lat.input_min_delta_r];
-    brt.lat.Dhi = [repmat(lat.input_max_Pi, 8, 1); lat.input_max_delta_a; lat.input_max_delta_r];
-    brt.lat.pl  = [repmat(dyn.input_min_Pi, 8, 1); dyn.input_min_delta_a; dyn.input_min_delta_r];
-    brt.lat.pu  = [repmat(dyn.input_max_Pi, 8, 1); dyn.input_max_delta_a; dyn.input_max_delta_r];
-end
-
-function gridInfo = axis_setup(sec, names)
-    gridInfo.gmin = cellfun(@(s) sec.(['grid_min_'   s]), names)';
-    gridInfo.gmax = cellfun(@(s) sec.(['grid_max_'   s]), names)';
-    gridInfo.tub  = cellfun(@(s) sec.(['target_max_' s]), names)';
-end
-
-function yml = read_yml(path)
-    lines = regexp(fileread(path), '\r?\n', 'split');
-    yml = struct();  sec = '';
-    for i = 1:numel(lines)
-        ln = regexprep(lines{i}, '#.*$', '');
-        if isempty(strtrim(ln)), continue; end
-        tok = regexp(ln, '^(\s*)([^:\s][^:]*):\s*(.*)$', 'tokens', 'once');
-        if isempty(tok), continue; end
-        indent = numel(tok{1});  key = strtrim(tok{2});  val = strtrim(tok{3});
-        if indent == 0
-            if isempty(val), sec = key;  yml.(sec) = struct(); end
-            continue;
-        end
-        if isempty(sec), continue; end
-        num = str2double(val);
-        if isnan(num), yml.(sec).(key) = val; else, yml.(sec).(key) = num; end
-    end
 end

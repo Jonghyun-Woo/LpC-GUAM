@@ -1,6 +1,6 @@
 % Visualizes the Monte-Carlo reach test written by tests/test_mc_verify.m.
-% Per case: trajectories projected onto the two sampled states, one tile per UH,
-% truncated at first target entry, framed on the BRT tube boundary.
+% One 1x4 figure at UH_VIEW (uw / qtheta / vp / rphi): trajectories projected onto
+% the two sampled states, truncated at first target entry, framed on the BRT tube boundary.
 % Figures go to reachability_data/mc_verify_timestack/figures/.
 
 clear; close all; clc;
@@ -14,6 +14,7 @@ dataDir = fullfile(root, 'reachability_data', 'mc_verify_timestack');
 figDir  = fullfile(dataDir, 'figures');
 CASES   = {'uw', 'qtheta', 'vp', 'rphi'};
 MARGIN  = 0.08;
+UH_VIEW = 12;
 % -------------------------------------------------------------------------
 
 if ~exist(figDir, 'dir'), mkdir(figDir); end
@@ -31,6 +32,10 @@ cReach = [0.00 0.45 0.74];
 cFail  = [0.85 0.10 0.10];
 rate   = struct('case', {}, 'uh', {}, 'pct', {});
 
+fig = figure('Name', sprintf('MC reach: UH%d', UH_VIEW), 'Color', 'w', ...
+             'Position', [40 40 1800 440]);
+tl  = tiledlayout(fig, 1, numel(CASES), 'Padding', 'compact', 'TileSpacing', 'compact');
+
 for ic = 1:numel(CASES)
     files = dir(fullfile(dataDir, sprintf('mc_%s_UH*.mat', CASES{ic})));
     if isempty(files)
@@ -41,14 +46,12 @@ for ic = 1:numel(CASES)
     [~, ord] = sort(uh_all);
     files = files(ord);
 
-    nt  = numel(files);
-    fig = figure('Name', sprintf('MC reach: %s', CASES{ic}), ...
-                 'Position', [40 40 1400 400 * ceil(nt / 3)]);
-    tl = tiledlayout(fig, ceil(nt / 3), min(3, nt), 'Padding', 'compact', ...
-                     'TileSpacing', 'compact');
-
-    for k = 1:nt
+    for k = 1:numel(files)
         S  = load(fullfile(dataDir, files(k).name));
+        rate(end + 1) = struct('case', CASES{ic}, 'uh', S.uh_idx, ...
+                               'pct', 100 * mean(S.reach)); %#ok<AGROW>
+        if S.uh_idx ~= UH_VIEW, continue; end
+
         vw = view(1 + strcmp(S.axis, 'lat'));
         d1 = S.free_dims(1);  d2 = S.free_dims(2);
         s1 = vw.scale(d1);    s2 = vw.scale(d2);
@@ -59,7 +62,7 @@ for ic = 1:numel(CASES)
         stop = size(S.X, 2) * ones(n, 1);
         stop(S.reach) = round(S.t_reach(S.reach) / S.dt) + 1;
 
-        nexttile(tl);  hold on; grid on; box on;
+        nexttile(tl, ic);  hold on; grid on; box on;
         for s = 1:n
             if S.reach(s), col = cReach; else, col = cFail; end
             plot(dev1(s, 1:stop(s)), dev2(s, 1:stop(s)), '-', ...
@@ -85,17 +88,13 @@ for ic = 1:numel(CASES)
         ylim(pad([min(pts(2, :)) max(pts(2, :))] * s2, MARGIN));
 
         xlabel(vw.label{d1});  ylabel(vw.label{d2});
-        title(sprintf('UH%d (u_{trim} = %.1f m/s)', ...
-                      S.uh_idx, S.uh_vel * ft2m));
-
-        rate(end + 1) = struct('case', CASES{ic}, 'uh', S.uh_idx, ...
-                               'pct', 100 * mean(S.reach)); %#ok<AGROW>
+        title(CASES{ic});
+        uh_vel = S.uh_vel;
     end
-
-    title(tl, sprintf(['BRT reach test, case %s   ' ...
-                       '(dashed = BRT boundary, green = target set, black = final state)'], CASES{ic}));
-    exportgraphics(fig, fullfile(figDir, sprintf('mc_reach_%s.png', CASES{ic})), 'Resolution', 150);
 end
+
+title(tl, sprintf('BRT reach test, UH%d (u_{trim} = %.1f m/s)', UH_VIEW, uh_vel * ft2m));
+exportgraphics(fig, fullfile(figDir, sprintf('mc_reach_UH%d.png', UH_VIEW)), 'Resolution', 150);
 
 fig = figure('Name', 'MC reach summary', 'Color', 'w', 'Position', [60 60 720 460]);
 hold on; grid on; box on;
