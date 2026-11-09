@@ -26,12 +26,11 @@ runDir = fullfile(root, 'reachability_data', DATASET, 'BRT');
 outDir = fullfile(root, 'reachability_data', 'mc_verify_timestack');
 if ~exist(outDir, 'dir'), mkdir(outDir); end
 
-yml       = read_yml(fullfile(runDir, 'guam_analysis_config.yml'));
-T_HORIZON = yml.hj_analysis_config.time;
+stackName = @(axis_name, uh_idx) fullfile(runDir, sprintf('BRT_%s_MAT', upper(axis_name)), ...
+                sprintf('GUAM_%s_BRT_UH%d_WH%d_stack.mat', upper(axis_name), uh_idx, WH_IDX));
+horizon   = load(stackName('lon', UH_LIST(1)), 'taus');
+T_HORIZON = horizon.taus(end);
 N_STEP    = round(T_HORIZON / DT);
-axisCfg   = axis_config(yml);
-axisCfg.lon.held_dev = FIX.lon;
-axisCfg.lat.held_dev = FIX.lat;
 
 cases = struct('name',      {'uw', 'qtheta', 'vp',  'rphi'}, ...
                'axis',      {'lon', 'lon',   'lat', 'lat'}, ...
@@ -58,24 +57,21 @@ parfor i_uh = 1:n_uh
     for i_axis = 1:2
         axis_name = 'lon';
         if i_axis == 2, axis_name = 'lat'; end
-        gridCfg = axisCfg.(axis_name);
+        stack_file = stackName(axis_name, uh_idx);
+        gridCfg    = grid_derived(brt_axis_config(axis_name, stack_file), FIX.(axis_name));
 
-        V_stack = load_stack(fullfile(runDir, sprintf('BRT_%s_MAT', upper(axis_name)), ...
-                             sprintf('GUAM_%s_BRT_UH%d_WH%d_stack.mat', ...
-                                     upper(axis_name), uh_idx, WH_IDX)));
+        V_stack  = load_stack(stack_file);
         gridCfg  = add_stack_indexing(gridCfg, size(V_stack));
         dt_slice = T_HORIZON / (gridCfg.n_slice - 1);
 
         sched = struct('U0', XU0(13:25), 'X0', XU0(1:12), ...
-                       'axis', axis_name, 'plant_rows', gridCfg.plant_rows);
+                       'axis', axis_name, 'plant_rows', gridCfg.state_rows);
         if i_axis == 1
             sched.Bp = trimTable.Bp_lon_interp(:, :, uh_idx, WH_IDX);
         else
             sched.Bp = trimTable.Bp_lat_interp(:, :, uh_idx, WH_IDX);
         end
-        u_trim         = sched.U0(gridCfg.u0_idx);
-        sched.input_lb = max(gridCfg.phys_lb, u_trim + gridCfg.delta_lb) - u_trim;
-        sched.input_ub = min(gridCfg.phys_ub, u_trim + gridCfg.delta_ub) - u_trim;
+        [sched.input_lb, sched.input_ub] = LivenessFilter.input_bounds(sched.U0, gridCfg);
 
         for i_case = 1:numel(cases)
             if ~strcmp(cases(i_case).axis, axis_name), continue; end
@@ -241,37 +237,11 @@ function x0_dev = sample_inside_tube(V_stack, gridCfg, free_dims, held_dev, n_wa
     x0_dev = x0_dev(1:min(n_want, size(x0_dev, 1)), :);
 end
 
-function axisCfg = axis_config(yml)
-    phys = yml.dynamics;
-
-    lon = yml.longitudinal;
-    axisCfg.lon = grid_from_yml(lon, {'u', 'w', 'q', 'theta'});
-    axisCfg.lon.u0_idx     = [5:12, 13, 3, 1];   % lift1..8, pusher, elevator, flap
-    axisCfg.lon.plant_rows = [4; 6; 11; 8];      % plant rows for u, w, q, theta
-    axisCfg.lon.delta_lb = [repmat(lon.input_min_Pi, 8, 1); lon.input_min_Pi_p; lon.input_min_delta_e; lon.input_min_delta_f];
-    axisCfg.lon.delta_ub = [repmat(lon.input_max_Pi, 8, 1); lon.input_max_Pi_p; lon.input_max_delta_e; lon.input_max_delta_f];
-    axisCfg.lon.phys_lb  = [repmat(phys.input_min_Pi, 8, 1); phys.input_min_Pi_p; phys.input_min_delta_e; phys.input_min_delta_f];
-    axisCfg.lon.phys_ub  = [repmat(phys.input_max_Pi, 8, 1); phys.input_max_Pi_p; phys.input_max_delta_e; phys.input_max_delta_f];
-
-    lat = yml.lateral;
-    axisCfg.lat = grid_from_yml(lat, {'v', 'p', 'r', 'phi'});
-    axisCfg.lat.u0_idx     = [5:12, 2, 4];       % lift1..8, aileron, rudder
-    axisCfg.lat.plant_rows = [5; 10; 12; 7];     % plant rows for v, p, r, phi
-    axisCfg.lat.delta_lb = [repmat(lat.input_min_Pi, 8, 1); lat.input_min_delta_a; lat.input_min_delta_r];
-    axisCfg.lat.delta_ub = [repmat(lat.input_max_Pi, 8, 1); lat.input_max_delta_a; lat.input_max_delta_r];
-    axisCfg.lat.phys_lb  = [repmat(phys.input_min_Pi, 8, 1); phys.input_min_delta_a; phys.input_min_delta_r];
-    axisCfg.lat.phys_ub  = [repmat(phys.input_max_Pi, 8, 1); phys.input_max_delta_a; phys.input_max_delta_r];
-end
-
-function gridCfg = grid_from_yml(section, names)
-    gridCfg.grid_min  = cellfun(@(s) section.(['grid_min_'    s]), names)';
-    gridCfg.grid_max  = cellfun(@(s) section.(['grid_max_'    s]), names)';
-    gridCfg.grid_num  = cellfun(@(s) section.(['grid_number_' s]), names)';
-    gridCfg.target_ub = cellfun(@(s) section.(['target_max_'  s]), names)';
+function gridCfg = grid_derived(gridCfg, held_dev)
     gridCfg.grid_step = (gridCfg.grid_max - gridCfg.grid_min) ./ (gridCfg.grid_num - 1);
     gridCfg.grid_vec  = arrayfun(@(a, b, n) linspace(a, b, n), gridCfg.grid_min, ...
                                  gridCfg.grid_max, gridCfg.grid_num, 'UniformOutput', false)';
-    gridCfg.held_dev  = zeros(4, 1);
+    gridCfg.held_dev  = held_dev;
 end
 
 function segs = tube_contour(V_stack, gridCfg, free_dims)
@@ -290,7 +260,7 @@ end
 function gridCfg = add_stack_indexing(gridCfg, stack_size)
     assert(isequal(stack_size(2:5), gridCfg.grid_num(:)'), ...
            'test_mc_verify:gridMismatch', ...
-           'stack size %s does not match the yml grid %s.', ...
+           'stack size %s does not match the BRT file grid %s.', ...
            mat2str(stack_size(2:5)), mat2str(gridCfg.grid_num(:)'));
     n = stack_size;
     gridCfg.n_slice = n(1);
@@ -303,25 +273,6 @@ function V_stack = load_stack(fname)
     % indexes into, from the .mat time-stack's 1xK cell of 4-D slices.
     s       = load(fname, 'Vslices');
     V_stack = permute(cat(5, s.Vslices{:}), [5 1 2 3 4]);
-end
-
-function yml = read_yml(path)
-    lines = regexp(fileread(path), '\r?\n', 'split');
-    yml = struct();  section = '';
-    for i_line = 1:numel(lines)
-        line_ = regexprep(lines{i_line}, '#.*$', '');
-        if isempty(strtrim(line_)), continue; end
-        tok = regexp(line_, '^(\s*)([^:\s][^:]*):\s*(.*)$', 'tokens', 'once');
-        if isempty(tok), continue; end
-        indent = numel(tok{1});  key = strtrim(tok{2});  val = strtrim(tok{3});
-        if indent == 0
-            if isempty(val), section = key;  yml.(section) = struct(); end
-            continue;
-        end
-        if isempty(section), continue; end
-        num = str2double(val);
-        if isnan(num), yml.(section).(key) = val; else, yml.(section).(key) = num; end
-    end
 end
 
 function save_result(fname, result)

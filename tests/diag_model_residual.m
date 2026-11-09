@@ -29,7 +29,10 @@ REGION_FRAC = struct('lon', 0.5, 'lat', 1.0);  % lon: inner tube (trim-only); la
 % -------------------------------------------------------------------------
 
 if ~exist(outDir, 'dir'), mkdir(outDir); end
-brt       = brt_setup(read_yml(fullfile(stackDir, 'guam_analysis_config.yml')));
+gridFile  = @(axis_name) fullfile(stackDir, sprintf('BRT_%s_MAT', upper(axis_name)), ...
+                sprintf('GUAM_%s_BRT_UH1_WH%d_stack.mat', upper(axis_name), WH_IDX));
+brt       = struct('lon', brt_axis_config('lon', gridFile('lon')), ...
+                   'lat', brt_axis_config('lat', gridFile('lat')));
 trimTable = load(fullfile(root, 'controller', 'trim_table_Poly_ConcatVer4p0.mat'));
 GUAM      = LpC_GUAM(Config('althold', struct('dt', DT)));
 
@@ -43,9 +46,9 @@ for ai = 1:2
     axisName = axes_(ai).name;
     is_lon   = strcmp(axisName, 'lon');
     gridInfo = brt.(axisName);
-    half     = (gridInfo.gmax - gridInfo.gmin) / 2;
-    cen      = (gridInfo.gmax + gridInfo.gmin) / 2;
-    prow     = gridInfo.prow;
+    half     = (gridInfo.grid_max - gridInfo.grid_min) / 2;
+    cen      = (gridInfo.grid_max + gridInfo.grid_min) / 2;
+    prow     = gridInfo.state_rows;
     frac     = REGION_FRAC.(axisName);
 
     fprintf('== %s ==  channels [%s]\n', upper(axisName), strjoin(axes_(ai).chan, ' '));
@@ -80,9 +83,7 @@ for ai = 1:2
         else
             % ----- envelope: Y = max_u |f_nl - (Ap*dev + Bp*u)| over bang-bang box -----
             sched      = struct('axis', axisName, 'U0', U0);
-            uTrim      = U0(gridInfo.U0_idx);
-            sched.lb   = max(gridInfo.pl, uTrim + gridInfo.Dlo) - uTrim;
-            sched.ub   = min(gridInfo.pu, uTrim + gridInfo.Dhi) - uTrim;
+            [sched.lb, sched.ub] = LivenessFilter.input_bounds(U0, gridInfo);
             us         = sched.lb' + (sched.ub - sched.lb)' .* rand(N_NU, numel(sched.lb));
             Y = zeros(N_DELTA, 4);
             parfor k = 1:N_DELTA
@@ -133,8 +134,8 @@ for ui = 1:nM
     beta_lon(:, :, ui) = D.lon(ui).beta;  infl_lon(:, ui) = D.lon(ui).infl';
     beta_lat(:, :, ui) = D.lat(ui).beta;  infl_lat(:, ui) = D.lat(ui).infl';
 end
-half_lon = ((brt.lon.gmax - brt.lon.gmin) / 2)';
-half_lat = ((brt.lat.gmax - brt.lat.gmin) / 2)';
+half_lon = ((brt.lon.grid_max - brt.lon.grid_min) / 2)';
+half_lat = ((brt.lat.grid_max - brt.lat.grid_min) / 2)';
 feature  = 'phi(z)=[1, z1..z4, z1^2..z4^2, pairwise], z=dev/half; lon trim-only OLS, lat max_u envelope + inflation';
 save(fullfile(outDir, 'guam_disturbance_quadfit.mat'), ...
      'beta_lon', 'beta_lat', 'half_lon', 'half_lat', 'infl_lon', 'infl_lat', 'UH_LIST', 'feature');
@@ -161,48 +162,4 @@ function [eng, srf] = actuator_cmd(sched, u)
         ele  = U0(3);          rud = U0(4) + u(10);
     end
     srf = [flap - ail; flap + ail; ele; ele; rud];
-end
-
-function brt = brt_setup(yml)
-    dyn = yml.dynamics;
-    lon = yml.longitudinal;
-    brt.lon = axis_setup(lon, {'u', 'w', 'q', 'theta'});
-    brt.lon.prow   = [4; 6; 11; 8];
-    brt.lon.U0_idx = [5:12, 13, 3, 1];
-    brt.lon.Dlo = [repmat(lon.input_min_Pi, 8, 1); lon.input_min_Pi_p; lon.input_min_delta_e; lon.input_min_delta_f];
-    brt.lon.Dhi = [repmat(lon.input_max_Pi, 8, 1); lon.input_max_Pi_p; lon.input_max_delta_e; lon.input_max_delta_f];
-    brt.lon.pl  = [repmat(dyn.input_min_Pi, 8, 1); dyn.input_min_Pi_p; dyn.input_min_delta_e; dyn.input_min_delta_f];
-    brt.lon.pu  = [repmat(dyn.input_max_Pi, 8, 1); dyn.input_max_Pi_p; dyn.input_max_delta_e; dyn.input_max_delta_f];
-    lat = yml.lateral;
-    brt.lat = axis_setup(lat, {'v', 'p', 'r', 'phi'});
-    brt.lat.prow   = [5; 10; 12; 7];
-    brt.lat.U0_idx = [5:12, 2, 4];
-    brt.lat.Dlo = [repmat(lat.input_min_Pi, 8, 1); lat.input_min_delta_a; lat.input_min_delta_r];
-    brt.lat.Dhi = [repmat(lat.input_max_Pi, 8, 1); lat.input_max_delta_a; lat.input_max_delta_r];
-    brt.lat.pl  = [repmat(dyn.input_min_Pi, 8, 1); dyn.input_min_delta_a; dyn.input_min_delta_r];
-    brt.lat.pu  = [repmat(dyn.input_max_Pi, 8, 1); dyn.input_max_delta_a; dyn.input_max_delta_r];
-end
-
-function gridInfo = axis_setup(sec, names)
-    gridInfo.gmin = cellfun(@(s) sec.(['grid_min_' s]), names)';
-    gridInfo.gmax = cellfun(@(s) sec.(['grid_max_' s]), names)';
-end
-
-function yml = read_yml(path)
-    lines = regexp(fileread(path), '\r?\n', 'split');
-    yml = struct();  sec = '';
-    for i = 1:numel(lines)
-        ln = regexprep(lines{i}, '#.*$', '');
-        if isempty(strtrim(ln)), continue; end
-        tok = regexp(ln, '^(\s*)([^:\s][^:]*):\s*(.*)$', 'tokens', 'once');
-        if isempty(tok), continue; end
-        indent = numel(tok{1});  key = strtrim(tok{2});  val = strtrim(tok{3});
-        if indent == 0
-            if isempty(val), sec = key;  yml.(sec) = struct(); end
-            continue;
-        end
-        if isempty(sec), continue; end
-        num = str2double(val);
-        if isnan(num), yml.(sec).(key) = val; else, yml.(sec).(key) = num; end
-    end
 end
